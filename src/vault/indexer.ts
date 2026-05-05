@@ -96,11 +96,46 @@ export interface IndexResult {
 /** Default directories to exclude when walking the vault. */
 const DEFAULT_EXCLUDE_DIRS = [".git", "node_modules", ".omc", "dist", "build", "coverage", ".claude", ".obsidian"];
 
-/** File extensions for code files that should be indexed. */
-const CODE_EXTENSIONS = new Set([".ts", ".js", ".mjs", ".cjs"]);
+/** Extensions for files that have import/require/include patterns we can parse. */
+const CODE_EXTENSIONS = new Set([
+  ".ts", ".js", ".mjs", ".cjs",
+  ".py", ".pyi", ".pyw",
+  ".go",
+  ".rs",
+  ".java",
+  ".kt", ".kts",
+  ".scala", ".sc",
+  ".swift",
+  ".c", ".h",
+  ".cpp", ".cxx", ".cc", ".hpp", ".hxx",
+  ".cs",
+  ".rb", ".rbx", ".ru",
+  ".php", ".phtml", ".php3", ".php4", ".php5", ".phps",
+  ".lua",
+  ".sh", ".bash", ".zsh", ".fish", ".ksh", ".csh", ".tcsh",
+  ".ps1", ".psm1", ".psd1",
+  ".html", ".htm", ".xhtml",
+  ".css", ".scss", ".sass", ".less", ".styl", ".stylus",
+  ".sql",
+]);
+
+/** Binary files we skip entirely (no node created). */
+const BINARY_EXTENSIONS = new Set([
+  ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg",
+  ".mp3", ".mp4", ".avi", ".mov", ".wav", ".ogg", ".flac",
+  ".zip", ".tar", ".gz", ".rar", ".7z", ".bz2", ".xz", ".tgz",
+  ".exe", ".dll", ".so", ".dylib",
+  ".woff", ".woff2", ".ttf", ".eot", ".otf",
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+  ".sqlite", ".db", ".bin", ".dat",
+  ".class", ".jar", ".war", ".ear",
+  ".o", ".a", ".obj", ".lib",
+  ".pyc", ".pyo", ".pyd", ".egg", ".whl",
+  ".gem", ".deb", ".rpm", ".msi", ".dmg", ".iso", ".img",
+]);
 
 /** Recursively collect all source file paths relative to vaultRoot.
- *  Collects .md files AND code files (.ts, .js, .mjs, .cjs).
+ *  Collects ALL non-binary files (.md, code, configs, docs).
  *  Symlinks are followed ONLY if they resolve within vaultRoot.
  *  Cycle detection prevents infinite recursion.
  */
@@ -165,7 +200,7 @@ function collectSourceFiles(
         collectSourceFiles(vaultRoot, fullPath, visited, acc, excludePatterns);
       } else if (targetStat.isFile()) {
         const ext = extname(entry.name);
-        if (entry.name.endsWith(".md") || CODE_EXTENSIONS.has(ext)) {
+        if (!BINARY_EXTENSIONS.has(ext)) {
           acc.push(relative(vaultRoot, fullPath).replace(/\\/g, "/"));
         }
       }
@@ -173,7 +208,7 @@ function collectSourceFiles(
       collectSourceFiles(vaultRoot, fullPath, visited, acc, excludePatterns);
     } else if (lstat.isFile()) {
       const ext = extname(entry.name);
-      if (entry.name.endsWith(".md") || CODE_EXTENSIONS.has(ext)) {
+      if (!BINARY_EXTENSIONS.has(ext)) {
         acc.push(relative(vaultRoot, fullPath).replace(/\\/g, "/"));
       }
     }
@@ -317,6 +352,61 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
     });
 
     if (item.existing) {
+      result.updated++;
+    } else {
+      result.indexed++;
+    }
+  }
+
+  // ── Pass 1c: upsert all other (non-code, non-md) file nodes ──
+  const otherFiles = allFiles.filter((f) => {
+    const ext = extname(f);
+    return !f.endsWith(".md") && !CODE_EXTENSIONS.has(ext) && !BINARY_EXTENSIONS.has(ext);
+  });
+
+  for (const relPath of otherFiles) {
+    const absPath = join(vaultRoot, relPath);
+    let stat: { mtimeMs: number };
+    try {
+      stat = statSync(absPath);
+    } catch {
+      continue;
+    }
+
+    const existing = store.getNode(relPath);
+    if (existing && existing.mtimeMs === stat.mtimeMs) {
+      result.skipped++;
+      continue;
+    }
+
+    const contentHash = createHash("sha256")
+      .update(relPath + String(stat.mtimeMs))
+      .digest("hex");
+
+    if (existing && existing.contentHash === contentHash) {
+      store.upsertNode({ ...existing, mtimeMs: stat.mtimeMs });
+      result.skipped++;
+      continue;
+    }
+
+    const title = relPath.replace(/\\/g, "/").split("/").pop() ?? relPath;
+    const dirParts = relPath
+      .replace(/\\/g, "/")
+      .split("/")
+      .slice(0, -1)
+      .filter((p) => p.length > 0 && !p.startsWith("."));
+
+    store.upsertNode({
+      path: relPath,
+      title,
+      frontmatter: {},
+      tags: dirParts,
+      contentHash,
+      mtimeMs: stat.mtimeMs,
+      inDegree: existing?.inDegree ?? 0,
+    });
+
+    if (existing) {
       result.updated++;
     } else {
       result.indexed++;
