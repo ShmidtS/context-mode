@@ -12,6 +12,19 @@ Analyze/count/filter/compare/search/parse/transform data: **write code** via `ct
 2. **FOLLOW-UP**: `ctx_search(queries: ["q1", "q2", ...])` — all follow-up questions, ONE call.
 3. **PROCESSING**: `ctx_execute(language, code)` | `ctx_execute_file(path, language, code)` — sandbox, only stdout enters context.
 4. **WEB**: `ctx_fetch_and_index(url)` then `ctx_search(queries)` — never dump raw HTML.
+5. **VAULT GRAPH**: `ctx_vault_index(vaultPath)` + `ctx_vault_graph(mode, nodePath|tag)` — index Obsidian vault or project directory, then traverse the graph (neighbors, backlinks, tag-cluster).
+
+## Vault Graph Tools
+
+When working with a knowledge base of markdown notes (or any project directory containing `.md` files):
+
+- **Index first**: `ctx_vault_index({ vaultPath: "absolute/path/to/vault" })` — builds a graph of notes, wiki-links `[[...]]`, tags `#tag`, and frontmatter.
+- **Query after indexing**:
+  - `ctx_vault_graph({ mode: "neighbors", nodePath: "Note.md", limit: 10 })` — BFS outward from a note up to 3 hops.
+  - `ctx_vault_graph({ mode: "backlinks", nodePath: "Note.md", limit: 10 })` — notes that link TO this note.
+  - `ctx_vault_graph({ mode: "tag-cluster", tag: "security", limit: 10 })` — all notes with tag + 1-hop neighbors.
+
+Use vault graph when the user asks about relationships between notes, finding related topics, or exploring a knowledge base. Prefer `ctx_search` for code-level queries; vault graph is for markdown document relationships.
 
 ## Rules
 

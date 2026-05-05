@@ -8,6 +8,8 @@
 
 import type { ContentStore, SearchResult } from "../store.js";
 import type { SessionDB, StoredEvent } from "../session/db.js";
+import type { VaultGraphStore } from "../vault/graph-store.js";
+import { VaultGraphSearch } from "../vault/search.js";
 import { searchAutoMemory, type AutoMemoryAdapter } from "./auto-memory.js";
 
 const DEBUG = process.env.DEBUG?.includes("context-mode");
@@ -20,7 +22,7 @@ export interface UnifiedSearchResult {
   title: string;
   content: string;
   source: string;
-  origin: "current-session" | "prior-session" | "auto-memory";
+  origin: "current-session" | "prior-session" | "auto-memory" | "vault-graph";
   timestamp?: string;
   rank?: number;
   matchLayer?: string;
@@ -40,6 +42,8 @@ export interface SearchAllSourcesOpts {
   configDir?: string;
   /** Detected platform adapter — used for adapter-aware auto-memory. */
   adapter?: AutoMemoryAdapter;
+  /** Vault graph store — when present, enables vault-graph fusion results. */
+  vaultStore?: VaultGraphStore | null;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -67,6 +71,7 @@ export function searchAllSources(opts: SearchAllSourcesOpts): UnifiedSearchResul
     projectDir,
     configDir,
     adapter,
+    vaultStore,
   } = opts;
 
   const results: UnifiedSearchResult[] = [];
@@ -76,8 +81,9 @@ export function searchAllSources(opts: SearchAllSourcesOpts): UnifiedSearchResul
   const sessionStartTime = new Date().toISOString();
 
   // ── Source 1: ContentStore (always, both modes) ──
+  let storeResults: SearchResult[] = [];
   try {
-    const storeResults = store.searchWithFallback(query, limit, source, contentType);
+    storeResults = store.searchWithFallback(query, limit, source, contentType);
     results.push(
       ...storeResults.map((r: SearchResult) => ({
         title: r.title,
@@ -121,6 +127,48 @@ export function searchAllSources(opts: SearchAllSourcesOpts): UnifiedSearchResul
       results.push(...memResults);
     } catch (e) {
       if (DEBUG) process.stderr.write(`[ctx] auto-memory search failed: ${e}\n`);
+    }
+  }
+
+  // ── Source 4: Vault-graph (both modes, when vaultStore present) ──
+  if (vaultStore) {
+    try {
+      const graphSearch = new VaultGraphSearch(vaultStore);
+      const graphResults = graphSearch.fusionSearch(query, storeResults);
+
+      if (sort === "timeline") {
+        // Timeline mode: interleave vault results by indexed_at timestamp
+        for (const gr of graphResults) {
+          const node = vaultStore.getNodeById(gr.id);
+          const timestamp = node?.indexed_at;
+          results.push({
+            title: gr.title,
+            content: gr.snippet ?? "",
+            source: gr.path,
+            origin: "vault-graph" as const,
+            timestamp,
+            rank: gr.fusionScore,
+            matchLayer: gr.matchLayer,
+            contentType: "prose",
+          });
+        }
+      } else {
+        // Relevance mode: append vault-graph results AFTER current-session
+        // fusion score becomes the rank
+        for (const gr of graphResults) {
+          results.push({
+            title: gr.title,
+            content: gr.snippet ?? "",
+            source: gr.path,
+            origin: "vault-graph" as const,
+            rank: gr.fusionScore,
+            matchLayer: gr.matchLayer,
+            contentType: "prose",
+          });
+        }
+      }
+    } catch (e) {
+      if (DEBUG) process.stderr.write(`[ctx] vault-graph search failed: ${e}\n`);
     }
   }
 
