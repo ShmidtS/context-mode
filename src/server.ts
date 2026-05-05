@@ -91,6 +91,127 @@ writeFileSync(
 // Lazy singleton — no DB overhead unless index/search is used
 let _store: ContentStore | null = null;
 
+// ── Shared vault graph store (same DB as ContentStore, separate connection) ──
+let _vaultStoreCache: { store: import("./vault/graph-store.js").VaultGraphStore; db: any } | null = null;
+let _projectVaultIndexed = false;
+const DEBUG_VAULT = process.env.DEBUG?.includes("context-mode");
+
+function createVaultAdapter(
+  store: import("./vault/graph-store.js").VaultGraphStore,
+  vaultPath: string,
+): import("./vault/indexer.js").VaultGraphStore {
+  return {
+    getNode: (path: string) => {
+      const n = store.getNodeByPath(path);
+      return n
+        ? {
+            path: n.note_path,
+            title: n.title,
+            frontmatter: n.frontmatter ? JSON.parse(n.frontmatter) : {},
+            tags: store.getTagsByNode(n.id).map((t: { tag: string }) => t.tag),
+            contentHash: n.content_hash,
+            mtimeMs: n.file_mtime,
+            inDegree: n.in_degree,
+          }
+        : undefined;
+    },
+    upsertNode: (node) => {
+      const fm =
+        node.frontmatter && Object.keys(node.frontmatter).length > 0
+          ? JSON.stringify(node.frontmatter)
+          : null;
+      const id = store.upsertNode(
+        vaultPath,
+        node.path,
+        node.title,
+        fm,
+        node.contentHash,
+        node.mtimeMs,
+        null,
+      );
+      store.deleteTagsByNode(id);
+      for (const tag of node.tags ?? []) {
+        store.insertTag(tag, id);
+      }
+    },
+    upsertEdge: (edge) => {
+      const sourceNode = store.getNodeByPath(edge.sourcePath);
+      const targetNode = edge.targetPath ? store.getNodeByPath(edge.targetPath) : null;
+      if (!sourceNode) return;
+      store.insertEdge(
+        sourceNode.id,
+        targetNode?.id ?? null,
+        edge.targetName ?? edge.targetPath ?? edge.sourcePath,
+        edge.alias ?? null,
+        edge.lineNumber,
+        edge.context ?? null,
+        edge.linkType,
+      );
+    },
+    removeEdgesFrom: (sourcePath: string) => {
+      const node = store.getNodeByPath(sourcePath);
+      if (node) store.deleteEdgesBySource(node.id);
+    },
+  };
+}
+
+/**
+ * Open (or reuse) the shared vault graph store. Auto-indexes the current
+ * project directory as a vault on first access if no vault_nodes exist.
+ */
+async function getSharedVaultStore(): Promise<{
+  store: import("./vault/graph-store.js").VaultGraphStore;
+  db: any;
+}> {
+  if (_vaultStoreCache) return _vaultStoreCache;
+
+  const Database = loadDatabase();
+  const db = new Database(getStorePath());
+  db.pragma("journal_mode = WAL");
+  const { VaultGraphStore } = await import("./vault/graph-store.js");
+  const store = new VaultGraphStore(db);
+  _vaultStoreCache = { store, db };
+
+  // Auto-index current project as vault on first access (once per session)
+  if (!_projectVaultIndexed && process.env.CTX_AUTO_INDEX_PROJECT !== "0") {
+    _projectVaultIndexed = true;
+    try {
+      const projectDir = getProjectDir();
+      const row = store.db
+        .prepare("SELECT COUNT(*) as cnt FROM vault_nodes WHERE vault_path = ?")
+        .get(projectDir) as { cnt: number } | undefined;
+      if (!row || row.cnt === 0) {
+        const { indexVault } = await import("./vault/indexer.js");
+        const { addVaultConfig } = await import("./vault/config.js");
+        const adapter = createVaultAdapter(store, projectDir);
+        const result = indexVault(projectDir, adapter);
+        // Recalc degrees only for nodes belonging to this project
+        const nodeIds = store.db
+          .prepare("SELECT id FROM vault_nodes WHERE vault_path = ?")
+          .all(projectDir) as { id: number }[];
+        for (const { id } of nodeIds) {
+          store.recalcDegrees(id);
+        }
+        addVaultConfig({
+          vaultPath: projectDir,
+          lastIndexedAt: new Date().toISOString(),
+          noteCount: result.indexed + result.updated,
+          edgeCount: store.getEdgeCount(),
+        });
+        if (DEBUG_VAULT)
+          process.stderr.write(
+            `[ctx] Auto-indexed project vault: ${projectDir} (${result.indexed + result.updated} nodes, ${result.brokenLinks} broken links)\n`,
+          );
+      }
+    } catch (e) {
+      if (DEBUG_VAULT)
+        process.stderr.write(`[ctx] auto-index project vault: ${e}\n`);
+    }
+  }
+
+  return _vaultStoreCache;
+}
+
 /**
  * Auto-index session events files written by SessionStart hook.
  * Scans ~/.claude/context-mode/sessions/ for *-events.md files.
@@ -1659,13 +1780,11 @@ server.registerTool(
         } catch { /* SessionDB unavailable — search ContentStore + auto-memory only */ }
       }
 
-      // Open vault graph store once before the loop
+      // Open vault graph store once before the loop (shared, cached, auto-indexes project)
       let vaultStore: import("./vault/graph-store.js").VaultGraphStore | null = null;
-      let vaultDb: any = null;
       try {
-        const { store: vs, db: vdb } = await getVaultStore();
+        const { store: vs } = await getSharedVaultStore();
         vaultStore = vs;
-        vaultDb = vdb;
       } catch { /* vault graph unavailable — search without it */ }
 
       const configDir = _detectedAdapter?.getConfigDir() ?? (process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
@@ -1728,7 +1847,6 @@ server.registerTool(
       }
       } finally {
         try { timelineDB?.close(); } catch {}
-        try { vaultDb?.close(); } catch {}
       }
 
       let output = sections.join("\n\n---\n\n");
@@ -3201,6 +3319,9 @@ server.registerTool(
             store.db.exec("DELETE FROM vault_frontmatter_keys");
             store.db.exec("DELETE FROM vault_nodes");
           } catch { /* best effort */ }
+          // Invalidate the shared cache so the next getSharedVaultStore() call
+          // rebuilds prepared statements against the newly emptied tables.
+          _vaultStoreCache = null;
         }
 
         const result = indexVault(vaultPath, adapter);
@@ -3263,46 +3384,42 @@ server.registerTool(
     try {
       const { VaultGraphSearch } = await import("./vault/search.js");
 
-      // Open shared DB and create store + search
-      const { store, db } = await getVaultStore();
-      try {
-        const search = new VaultGraphSearch(store);
+      // Use shared vault store (auto-indexes project on first access)
+      const { store } = await getSharedVaultStore();
+      const search = new VaultGraphSearch(store);
 
-        let results: import("./types.js").GraphSearchResult[] = [];
+      let results: import("./types.js").GraphSearchResult[] = [];
 
-        if (args.mode === "neighbors" && args.nodePath) {
-          const node = store.getNodeByPath(args.nodePath);
-          if (!node) {
-            return trackResponse("ctx_vault_graph", {
-              content: [{ type: "text" as const, text: `Node not found: ${args.nodePath}` }],
-              isError: true,
-            });
-          }
-          results = search.neighbors(node.id, args.maxHops).slice(0, args.limit);
-        } else if (args.mode === "backlinks" && args.nodePath) {
-          const node = store.getNodeByPath(args.nodePath);
-          if (!node) {
-            return trackResponse("ctx_vault_graph", {
-              content: [{ type: "text" as const, text: `Node not found: ${args.nodePath}` }],
-              isError: true,
-            });
-          }
-          results = search.backlinks(node.id).slice(0, args.limit);
-        } else if (args.mode === "tag-cluster" && args.tag) {
-          results = search.tagCluster(args.tag).slice(0, args.limit);
-        } else {
+      if (args.mode === "neighbors" && args.nodePath) {
+        const node = store.getNodeByPath(args.nodePath);
+        if (!node) {
           return trackResponse("ctx_vault_graph", {
-            content: [{ type: "text" as const, text: "Invalid mode or missing required parameter" }],
+            content: [{ type: "text" as const, text: `Node not found: ${args.nodePath}` }],
             isError: true,
           });
         }
-
+        results = search.neighbors(node.id, args.maxHops).slice(0, args.limit);
+      } else if (args.mode === "backlinks" && args.nodePath) {
+        const node = store.getNodeByPath(args.nodePath);
+        if (!node) {
+          return trackResponse("ctx_vault_graph", {
+            content: [{ type: "text" as const, text: `Node not found: ${args.nodePath}` }],
+            isError: true,
+          });
+        }
+        results = search.backlinks(node.id).slice(0, args.limit);
+      } else if (args.mode === "tag-cluster" && args.tag) {
+        results = search.tagCluster(args.tag).slice(0, args.limit);
+      } else {
         return trackResponse("ctx_vault_graph", {
-          content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }],
+          content: [{ type: "text" as const, text: "Invalid mode or missing required parameter" }],
+          isError: true,
         });
-      } finally {
-        db.close();
       }
+
+      return trackResponse("ctx_vault_graph", {
+        content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }],
+      });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       return trackResponse("ctx_vault_graph", {
@@ -3334,6 +3451,10 @@ async function main() {
   const shutdown = () => {
     executor.cleanupBackgrounded();
     if (_store) _store.close(); // persist DB for --continue sessions
+    if (_vaultStoreCache) {
+      try { _vaultStoreCache.db.close(); } catch { /* best effort */ }
+      _vaultStoreCache = null;
+    }
     try { unlinkSync(CM_FS_PRELOAD); } catch { /* best effort */ }
     // Remove MCP readiness sentinel (#230)
     try { unlinkSync(mcpSentinel); } catch { /* best effort */ }

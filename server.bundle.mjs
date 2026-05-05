@@ -28926,6 +28926,86 @@ var CM_FS_PRELOAD = join19(tmpdir4(), `cm-fs-preload-${process.pid}.js`);
 writeFileSync12(CM_FS_PRELOAD, `(function(){var __cm_fs=0;process.on('exit',function(){if(__cm_fs>0)try{process.stderr.write('__CM_FS__:'+__cm_fs+'\\n')}catch(e){}});try{var f=require('fs');var ors=f.readFileSync;f.readFileSync=function(){var r=ors.apply(this,arguments);if(Buffer.isBuffer(r))__cm_fs+=r.length;else if(typeof r==='string')__cm_fs+=Buffer.byteLength(r);return r;};}catch(e){}})();
 `);
 var _store = null;
+var _vaultStoreCache = null;
+var _projectVaultIndexed = false;
+var DEBUG_VAULT = process.env.DEBUG?.includes("context-mode");
+function createVaultAdapter(store, vaultPath) {
+  return {
+    getNode: (path) => {
+      const n = store.getNodeByPath(path);
+      return n ? {
+        path: n.note_path,
+        title: n.title,
+        frontmatter: n.frontmatter ? JSON.parse(n.frontmatter) : {},
+        tags: store.getTagsByNode(n.id).map((t) => t.tag),
+        contentHash: n.content_hash,
+        mtimeMs: n.file_mtime,
+        inDegree: n.in_degree
+      } : undefined;
+    },
+    upsertNode: (node) => {
+      const fm = node.frontmatter && Object.keys(node.frontmatter).length > 0 ? JSON.stringify(node.frontmatter) : null;
+      const id = store.upsertNode(vaultPath, node.path, node.title, fm, node.contentHash, node.mtimeMs, null);
+      store.deleteTagsByNode(id);
+      for (const tag of node.tags ?? []) {
+        store.insertTag(tag, id);
+      }
+    },
+    upsertEdge: (edge) => {
+      const sourceNode = store.getNodeByPath(edge.sourcePath);
+      const targetNode = edge.targetPath ? store.getNodeByPath(edge.targetPath) : null;
+      if (!sourceNode)
+        return;
+      store.insertEdge(sourceNode.id, targetNode?.id ?? null, edge.targetName ?? edge.targetPath ?? edge.sourcePath, edge.alias ?? null, edge.lineNumber, edge.context ?? null, edge.linkType);
+    },
+    removeEdgesFrom: (sourcePath) => {
+      const node = store.getNodeByPath(sourcePath);
+      if (node)
+        store.deleteEdgesBySource(node.id);
+    }
+  };
+}
+async function getSharedVaultStore() {
+  if (_vaultStoreCache)
+    return _vaultStoreCache;
+  const Database = loadDatabase();
+  const db = new Database(getStorePath());
+  db.pragma("journal_mode = WAL");
+  const { VaultGraphStore: VaultGraphStore2 } = await Promise.resolve().then(() => exports_graph_store);
+  const store = new VaultGraphStore2(db);
+  _vaultStoreCache = { store, db };
+  if (!_projectVaultIndexed && process.env.CTX_AUTO_INDEX_PROJECT !== "0") {
+    _projectVaultIndexed = true;
+    try {
+      const projectDir = getProjectDir();
+      const row = store.db.prepare("SELECT COUNT(*) as cnt FROM vault_nodes WHERE vault_path = ?").get(projectDir);
+      if (!row || row.cnt === 0) {
+        const { indexVault: indexVault2 } = await Promise.resolve().then(() => (init_indexer(), exports_indexer));
+        const { addVaultConfig: addVaultConfig2 } = await Promise.resolve().then(() => (init_config(), exports_config));
+        const adapter = createVaultAdapter(store, projectDir);
+        const result = indexVault2(projectDir, adapter);
+        const nodeIds = store.db.prepare("SELECT id FROM vault_nodes WHERE vault_path = ?").all(projectDir);
+        for (const { id } of nodeIds) {
+          store.recalcDegrees(id);
+        }
+        addVaultConfig2({
+          vaultPath: projectDir,
+          lastIndexedAt: new Date().toISOString(),
+          noteCount: result.indexed + result.updated,
+          edgeCount: store.getEdgeCount()
+        });
+        if (DEBUG_VAULT)
+          process.stderr.write(`[ctx] Auto-indexed project vault: ${projectDir} (${result.indexed + result.updated} nodes, ${result.brokenLinks} broken links)
+`);
+      }
+    } catch (e) {
+      if (DEBUG_VAULT)
+        process.stderr.write(`[ctx] auto-index project vault: ${e}
+`);
+    }
+  }
+  return _vaultStoreCache;
+}
 function maybeIndexSessionEvents(store) {
   try {
     const sessionsDir = getSessionDir();
@@ -29010,7 +29090,7 @@ var _latestVersion = null;
 var _warningBurstCount = 0;
 var _lastBurstStart = 0;
 var VERSION_BURST_SIZE = 3;
-var VERSION_SILENT_MS = 60 * 60 * 1000;
+var VERSION_SILENT_MS = 3600000;
 async function fetchLatestVersion() {
   return new Promise((res) => {
     const req = httpsRequest("https://registry.npmjs.org/context-mode/latest", { headers: { Connection: "close" } }, (resp) => {
@@ -29320,7 +29400,7 @@ function extractSnippet(content, query, maxLen = 1500, highlighted) {
 
 `);
 }
-function formatBatchQueryResults(store, queries, source, maxOutput = 80 * 1024) {
+function formatBatchQueryResults(store, queries, source, maxOutput = 81920) {
   const sections = [];
   let outputSize = 0;
   for (const query of queries) {
@@ -29483,7 +29563,7 @@ When reporting results — terse like caveman. Technical substance exact. Only f
     code: exports_external.string().describe("Source code to execute. Use console.log (JS/TS), print (Python/Ruby/Perl/R), echo (Shell), echo (PHP), fmt.Println (Go), or IO.puts (Elixir) to output a summary to context."),
     timeout: exports_external.coerce.number().optional().describe("Max execution time in ms. When omitted, no server-side timer fires — the MCP host's RPC timeout governs (which is the right layer for this policy). Pass an explicit value for long-running builds (Gradle/Maven/SBT)."),
     background: exports_external.boolean().optional().default(false).describe("Keep process running after timeout (for servers/daemons). Returns partial output without killing the process. IMPORTANT: Do NOT add setTimeout/self-close timers in background scripts — the process must stay alive until the timeout detaches it. For server+fetch patterns, prefer putting both server and fetch in ONE ctx_execute call instead of using background."),
-    intent: exports_external.string().optional().describe("What you're looking for in the output. When provided and output is large (>5KB), " + "indexes output into knowledge base and returns section titles + previews — not full content. " + "Use ctx_search(queries: [...]) to retrieve specific sections. Example: 'failing tests', 'HTTP 500 errors'." + `
+    intent: exports_external.string().optional().describe("What you're looking for in the output. When provided and output is large (>5KB), " + "indexes output into knowledge base and returns section titles + previews — not full content. " + `Use ctx_search(queries: [...]) to retrieve specific sections. Example: 'failing tests', 'HTTP 500 errors'.
 
 TIP: Use specific technical terms, not just concepts. Check 'Searchable terms' in the response for available vocabulary.`)
   })
@@ -29753,7 +29833,7 @@ When reporting results — terse like caveman. Technical substance exact. Only f
     ]).describe("Runtime language"),
     code: exports_external.string().describe("Code to process FILE_CONTENT (file_content in Elixir). Print summary via console.log/print/echo/IO.puts."),
     timeout: exports_external.coerce.number().optional().describe("Max execution time in ms. When omitted, no server-side timer fires — the MCP host's RPC timeout governs."),
-    intent: exports_external.string().optional().describe("What you're looking for in the output. When provided and output is large (>5KB), " + "returns only matching sections via BM25 search instead of truncated output.")
+    intent: exports_external.string().optional().describe("What you're looking for in the output. When provided and output is large (>5KB), returns only matching sections via BM25 search instead of truncated output.")
   })
 }, async ({ path, language, code, timeout, intent }) => {
   const pathDenied = checkFilePathDenyPolicy(path, "execute_file");
@@ -29847,18 +29927,19 @@ When reporting results — terse like caveman. Technical substance exact. Only f
 });
 server.registerTool("ctx_index", {
   title: "Index Content",
-  description: "Index documentation or knowledge content into a searchable BM25 knowledge base. " + "Chunks markdown by headings (keeping code blocks intact) and stores in ephemeral FTS5 database. " + `The full content does NOT stay in context — only a brief summary is returned.
+  description: "Index documentation or knowledge content into a searchable BM25 knowledge base. Chunks markdown by headings (keeping code blocks intact) and stores in ephemeral FTS5 database. " + `The full content does NOT stay in context — only a brief summary is returned.
 
 ` + `WHEN TO USE:
-` + `- Documentation from Context7, Skills, or MCP tools (API docs, framework guides, code examples)
-` + `- API references (endpoint details, parameter specs, response schemas)
-` + `- MCP tools/list output (exact tool signatures and descriptions)
-` + `- Skill prompts and instructions that are too large for context
-` + `- README files, migration guides, changelog entries
-` + `- Any content with code examples you may need to reference precisely
+- Documentation from Context7, Skills, or MCP tools (API docs, framework guides, code examples)
+- API references (endpoint details, parameter specs, response schemas)
+- MCP tools/list output (exact tool signatures and descriptions)
+- Skill prompts and instructions that are too large for context
+- README files, migration guides, changelog entries
+- Any content with code examples you may need to reference precisely
 
-` + `After indexing, use 'ctx_search' to retrieve specific sections on-demand.
-` + "When `path` is provided, a content hash is stored for automatic stale detection in search results.\n" + "Do NOT use for: log files, test output, CSV, build output — use 'ctx_execute_file' for those.",
+After indexing, use 'ctx_search' to retrieve specific sections on-demand.
+When \`path\` is provided, a content hash is stored for automatic stale detection in search results.
+` + "Do NOT use for: log files, test output, CSV, build output — use 'ctx_execute_file' for those.",
   inputSchema: exports_external.object({
     content: exports_external.string().optional().describe("Raw text/markdown to index. Provide this OR path, not both."),
     path: exports_external.string().optional().describe("File path to read and index (content never enters context). Provide this OR content."),
@@ -29931,11 +30012,11 @@ function coerceCommandsArray(val) {
 }
 server.registerTool("ctx_search", {
   title: "Search Indexed Content",
-  description: "Search indexed content. Requires prior indexing via ctx_batch_execute, ctx_index, or ctx_fetch_and_index. " + "Pass ALL search questions as queries array in ONE call. " + `File-backed sources are auto-refreshed when the source file changes.
+  description: `Search indexed content. Requires prior indexing via ctx_batch_execute, ctx_index, or ctx_fetch_and_index. Pass ALL search questions as queries array in ONE call. File-backed sources are auto-refreshed when the source file changes.
 
-` + `TIPS: 2-4 specific terms per query. Use 'source' to scope results.
+TIPS: 2-4 specific terms per query. Use 'source' to scope results.
 
-` + `SESSION STATE: If skills, roles, or decisions were set earlier in this conversation, they are still active. Do not discard or contradict them.
+SESSION STATE: If skills, roles, or decisions were set earlier in this conversation, they are still active. Do not discard or contradict them.
 
 ` + "When reporting results — terse like caveman. Technical substance exact. Only fluff die. Pattern: [thing] [action] [reason]. [next step].",
   inputSchema: exports_external.object({
@@ -29943,7 +30024,7 @@ server.registerTool("ctx_search", {
     limit: exports_external.number().optional().default(3).describe("Results per query (default: 3)"),
     source: exports_external.string().optional().describe("Filter to a specific indexed source (partial match)."),
     contentType: exports_external.enum(["code", "prose"]).optional().describe("Filter results by content type: 'code' or 'prose'."),
-    sort: exports_external.enum(["relevance", "timeline"]).optional().default("relevance").describe("Sort mode. 'relevance' (default): BM25 ranked, current session only. " + "'timeline': chronological across current session, prior sessions, and auto-memory.")
+    sort: exports_external.enum(["relevance", "timeline"]).optional().default("relevance").describe("Sort mode. 'relevance' (default): BM25 ranked, current session only. 'timeline': chronological across current session, prior sessions, and auto-memory.")
   })
 }, async (params) => {
   try {
@@ -29955,7 +30036,7 @@ server.registerTool("ctx_search", {
           type: "text",
           text: `Knowledge base is empty — no content has been indexed yet.
 
-` + "ctx_search is a follow-up tool that queries previously indexed content. " + `To gather and index content first, use:
+` + `ctx_search is a follow-up tool that queries previously indexed content. To gather and index content first, use:
 ` + `  • ctx_batch_execute(commands, queries) — run commands, auto-index output, and search in one call
 ` + `  • ctx_fetch_and_index(url) — fetch a URL, index it, then search with ctx_search
 ` + `  • ctx_index(content, source) — manually index text content
@@ -29989,13 +30070,13 @@ server.registerTool("ctx_search", {
       return trackResponse("ctx_search", {
         content: [{
           type: "text",
-          text: `BLOCKED: ${searchCallCount} search calls in ${Math.round((now - searchWindowStart) / 1000)}s. ` + "You're flooding context. STOP making individual search calls. " + "Use ctx_batch_execute(commands, queries) for your next research step."
+          text: `BLOCKED: ${searchCallCount} search calls in ${Math.round((now - searchWindowStart) / 1000)}s. You're flooding context. STOP making individual search calls. Use ctx_batch_execute(commands, queries) for your next research step.`
         }],
         isError: true
       });
     }
     const effectiveLimit = searchCallCount > SEARCH_MAX_RESULTS_AFTER ? 1 : Math.min(limit, 2);
-    const MAX_TOTAL = 40 * 1024;
+    const MAX_TOTAL = 40960;
     let totalSize = 0;
     const sections = [];
     let timelineDB = null;
@@ -30009,11 +30090,9 @@ server.registerTool("ctx_search", {
       } catch {}
     }
     let vaultStore = null;
-    let vaultDb = null;
     try {
-      const { store: vs, db: vdb } = await getVaultStore();
+      const { store: vs } = await getSharedVaultStore();
       vaultStore = vs;
-      vaultDb = vdb;
     } catch {}
     const configDir = _detectedAdapter?.getConfigDir() ?? (process.env.CLAUDE_CONFIG_DIR || join19(homedir17(), ".claude"));
     try {
@@ -30080,9 +30159,6 @@ ${formatted}`);
       try {
         timelineDB?.close();
       } catch {}
-      try {
-        vaultDb?.close();
-      } catch {}
     }
     let output = sections.join(`
 
@@ -30097,7 +30173,7 @@ ${formatted}`);
     if (searchCallCount >= SEARCH_MAX_RESULTS_AFTER) {
       output += `
 
-⚠ search call #${searchCallCount}/${SEARCH_BLOCK_AFTER} in this window. ` + `Results limited to ${effectiveLimit}/query. ` + `Batch queries: ctx_search(queries: ["q1","q2","q3"]) or use ctx_batch_execute.`;
+⚠ search call #${searchCallCount}/${SEARCH_BLOCK_AFTER} in this window. Results limited to ${effectiveLimit}/query. Batch queries: ctx_search(queries: ["q1","q2","q3"]) or use ctx_batch_execute.`;
     }
     if (output.trim().length === 0) {
       const sources = store.listSources();
@@ -30186,7 +30262,7 @@ async function main() {
 main();
 `;
 }
-var FETCH_TTL_MS = 24 * 60 * 60 * 1000;
+var FETCH_TTL_MS = 86400000;
 var FETCH_PREVIEW_LIMIT = 3072;
 async function ssrfGuard(rawUrl) {
   let parsed;
@@ -31173,6 +31249,7 @@ server.registerTool("ctx_vault_index", {
           store.db.exec("DELETE FROM vault_frontmatter_keys");
           store.db.exec("DELETE FROM vault_nodes");
         } catch {}
+        _vaultStoreCache = null;
       }
       const result = indexVault2(vaultPath, adapter);
       const nodeIds = store.db.prepare("SELECT id FROM vault_nodes").all();
@@ -31218,42 +31295,38 @@ Modes:
 }, async (args) => {
   try {
     const { VaultGraphSearch: VaultGraphSearch2 } = await Promise.resolve().then(() => (init_search(), exports_search));
-    const { store, db } = await getVaultStore();
-    try {
-      const search = new VaultGraphSearch2(store);
-      let results = [];
-      if (args.mode === "neighbors" && args.nodePath) {
-        const node = store.getNodeByPath(args.nodePath);
-        if (!node) {
-          return trackResponse("ctx_vault_graph", {
-            content: [{ type: "text", text: `Node not found: ${args.nodePath}` }],
-            isError: true
-          });
-        }
-        results = search.neighbors(node.id, args.maxHops).slice(0, args.limit);
-      } else if (args.mode === "backlinks" && args.nodePath) {
-        const node = store.getNodeByPath(args.nodePath);
-        if (!node) {
-          return trackResponse("ctx_vault_graph", {
-            content: [{ type: "text", text: `Node not found: ${args.nodePath}` }],
-            isError: true
-          });
-        }
-        results = search.backlinks(node.id).slice(0, args.limit);
-      } else if (args.mode === "tag-cluster" && args.tag) {
-        results = search.tagCluster(args.tag).slice(0, args.limit);
-      } else {
+    const { store } = await getSharedVaultStore();
+    const search = new VaultGraphSearch2(store);
+    let results = [];
+    if (args.mode === "neighbors" && args.nodePath) {
+      const node = store.getNodeByPath(args.nodePath);
+      if (!node) {
         return trackResponse("ctx_vault_graph", {
-          content: [{ type: "text", text: "Invalid mode or missing required parameter" }],
+          content: [{ type: "text", text: `Node not found: ${args.nodePath}` }],
           isError: true
         });
       }
+      results = search.neighbors(node.id, args.maxHops).slice(0, args.limit);
+    } else if (args.mode === "backlinks" && args.nodePath) {
+      const node = store.getNodeByPath(args.nodePath);
+      if (!node) {
+        return trackResponse("ctx_vault_graph", {
+          content: [{ type: "text", text: `Node not found: ${args.nodePath}` }],
+          isError: true
+        });
+      }
+      results = search.backlinks(node.id).slice(0, args.limit);
+    } else if (args.mode === "tag-cluster" && args.tag) {
+      results = search.tagCluster(args.tag).slice(0, args.limit);
+    } else {
       return trackResponse("ctx_vault_graph", {
-        content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+        content: [{ type: "text", text: "Invalid mode or missing required parameter" }],
+        isError: true
       });
-    } finally {
-      db.close();
     }
+    return trackResponse("ctx_vault_graph", {
+      content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return trackResponse("ctx_vault_graph", {
@@ -31273,6 +31346,12 @@ async function main() {
     executor.cleanupBackgrounded();
     if (_store)
       _store.close();
+    if (_vaultStoreCache) {
+      try {
+        _vaultStoreCache.db.close();
+      } catch {}
+      _vaultStoreCache = null;
+    }
     try {
       unlinkSync3(CM_FS_PRELOAD);
     } catch {}
