@@ -286,7 +286,7 @@ export class VaultGraphSearch {
     textResults: SearchResult[],
     opts?: FusionSearchOpts,
   ): GraphSearchResult[] {
-    const graphBoost = opts?.graphBoost ?? 0.3;
+    const graphBoost = opts?.graphBoost ?? 2.0;
     const maxHops = Math.min(opts?.maxHops ?? 2, 3);
     const K = 60; // Standard RRF constant
 
@@ -309,6 +309,16 @@ export class VaultGraphSearch {
         existing.textRank = rank;
       } else {
         scoreMap.set(node.id, { score: textScore, textRank: rank, hopDistance: 0 });
+      }
+    }
+
+    // Step 1b: Fallback — if no text results matched vault nodes, search vault directly by query
+    if (seedNodeIds.length === 0) {
+      const directNodes = this.#store.searchNodes(query);
+      for (const node of directNodes) {
+        if (seedNodeIds.includes(node.id)) continue;
+        seedNodeIds.push(node.id);
+        scoreMap.set(node.id, { score: 1.0, hopDistance: 0 });
       }
     }
 

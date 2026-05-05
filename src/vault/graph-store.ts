@@ -275,6 +275,22 @@ export class VaultGraphStore {
     return row ? this.#mapNode(row) : null;
   }
 
+  /** Search nodes by query tokens in note_path or title. */
+  searchNodes(query: string): VaultNode[] {
+    const tokens = query
+      .split(/\s+/)
+      .map((t) => t.replace(/[^a-zA-Z0-9_./-]/g, ""))
+      .filter((t) => t.length >= 3);
+    if (tokens.length === 0) return [];
+
+    const conditions = tokens.map(() => "note_path LIKE ? OR title LIKE ?").join(" OR ");
+    const params = tokens.flatMap((t) => [`%${t}%`, `%${t}%`]);
+    const rows = this.#db.prepare(
+      `SELECT * FROM vault_nodes WHERE ${conditions}`
+    ).all(...params) as NodeRow[];
+    return rows.map((r) => this.#mapNode(r));
+  }
+
   /** Get all nodes that have a specific tag. */
   getNodesByTag(tag: string): VaultNode[] {
     const rows = this.#stmtGetNodesByTag.all(tag) as NodeRow[];

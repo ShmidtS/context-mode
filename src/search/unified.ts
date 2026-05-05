@@ -184,6 +184,9 @@ export function searchAllSources(opts: SearchAllSourcesOpts): UnifiedSearchResul
   // ── Sort ──
   if (sort === "timeline") {
     results.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
+  } else {
+    // Relevance mode: higher rank first (ContentStore BM25 + vault-graph fusion scores)
+    results.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0));
   }
 
   return results.slice(0, limit);

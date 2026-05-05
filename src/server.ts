@@ -1659,6 +1659,15 @@ server.registerTool(
         } catch { /* SessionDB unavailable — search ContentStore + auto-memory only */ }
       }
 
+      // Open vault graph store once before the loop
+      let vaultStore: import("./vault/graph-store.js").VaultGraphStore | null = null;
+      let vaultDb: any = null;
+      try {
+        const { store: vs, db: vdb } = await getVaultStore();
+        vaultStore = vs;
+        vaultDb = vdb;
+      } catch { /* vault graph unavailable — search without it */ }
+
       const configDir = _detectedAdapter?.getConfigDir() ?? (process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
 
       try {
@@ -1681,9 +1690,21 @@ server.registerTool(
             projectDir: getProjectDir(),
             configDir,
             adapter: _detectedAdapter ?? undefined,
+            vaultStore,
           });
         } else {
-          results = store.searchWithFallback(q, effectiveLimit, source, contentType);
+          results = searchAllSources({
+            query: q,
+            limit: effectiveLimit,
+            store,
+            sort: "relevance",
+            source,
+            contentType,
+            projectDir: getProjectDir(),
+            configDir,
+            adapter: _detectedAdapter ?? undefined,
+            vaultStore,
+          });
         }
 
         if (results.length === 0) {
@@ -1707,6 +1728,7 @@ server.registerTool(
       }
       } finally {
         try { timelineDB?.close(); } catch {}
+        try { vaultDb?.close(); } catch {}
       }
 
       let output = sections.join("\n\n---\n\n");
