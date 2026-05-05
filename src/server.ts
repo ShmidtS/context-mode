@@ -31,7 +31,7 @@ import { classifyNonZeroExit } from "./exit-classify.js";
 import { startLifecycleGuard } from "./lifecycle.js";
 import { getWorktreeSuffix, SessionDB } from "./session/db.js";
 import { persistToolCallCounter, restoreSessionStats } from "./session/persist-tool-calls.js";
-import { searchAllSources } from "./search/unified.js";
+import { searchAllSources, type UnifiedSearchResult } from "./search/unified.js";
 import { buildNodeCommand, type HookAdapter } from "./adapters/types.js";
 import { detectPlatform, getSessionDirSegments } from "./adapters/detect.js";
 import { loadDatabase } from "./db-base.js";
@@ -92,67 +92,18 @@ writeFileSync(
 let _store: ContentStore | null = null;
 
 // ── Shared vault graph store (same DB as ContentStore, separate connection) ──
-let _vaultStoreCache: { store: import("./vault/graph-store.js").VaultGraphStore; db: any } | null = null;
+let _vaultStoreCache: { store: import("./vault/graph-store.js").VaultGraphStore; search: import("./vault/search.js").VaultGraphSearch; db: any } | null = null;
 let _projectVaultIndexed = false;
 const DEBUG_VAULT = process.env.DEBUG?.includes("context-mode");
 
-function createVaultAdapter(
-  store: import("./vault/graph-store.js").VaultGraphStore,
-  vaultPath: string,
-): import("./vault/indexer.js").VaultGraphStore {
-  return {
-    getNode: (path: string) => {
-      const n = store.getNodeByPath(path);
-      return n
-        ? {
-            path: n.note_path,
-            title: n.title,
-            frontmatter: n.frontmatter ? JSON.parse(n.frontmatter) : {},
-            tags: store.getTagsByNode(n.id).map((t: { tag: string }) => t.tag),
-            contentHash: n.content_hash,
-            mtimeMs: n.file_mtime,
-            inDegree: n.in_degree,
-          }
-        : undefined;
-    },
-    upsertNode: (node) => {
-      const fm =
-        node.frontmatter && Object.keys(node.frontmatter).length > 0
-          ? JSON.stringify(node.frontmatter)
-          : null;
-      const id = store.upsertNode(
-        vaultPath,
-        node.path,
-        node.title,
-        fm,
-        node.contentHash,
-        node.mtimeMs,
-        null,
-      );
-      store.deleteTagsByNode(id);
-      for (const tag of node.tags ?? []) {
-        store.insertTag(tag, id);
-      }
-    },
-    upsertEdge: (edge) => {
-      const sourceNode = store.getNodeByPath(edge.sourcePath);
-      const targetNode = edge.targetPath ? store.getNodeByPath(edge.targetPath) : null;
-      if (!sourceNode) return;
-      store.insertEdge(
-        sourceNode.id,
-        targetNode?.id ?? null,
-        edge.targetName ?? edge.targetPath ?? edge.sourcePath,
-        edge.alias ?? null,
-        edge.lineNumber,
-        edge.context ?? null,
-        edge.linkType,
-      );
-    },
-    removeEdgesFrom: (sourcePath: string) => {
-      const node = store.getNodeByPath(sourcePath);
-      if (node) store.deleteEdgesBySource(node.id);
-    },
-  };
+// Lazy import — used by getSharedVaultStore and ctx_vault_index handler
+let _createVaultAdapter: typeof import("./vault/adapter.js").createVaultAdapter | null = null;
+async function getVaultAdapter() {
+  if (!_createVaultAdapter) {
+    const mod = await import("./vault/adapter.js");
+    _createVaultAdapter = mod.createVaultAdapter;
+  }
+  return _createVaultAdapter;
 }
 
 /**
@@ -161,6 +112,7 @@ function createVaultAdapter(
  */
 async function getSharedVaultStore(): Promise<{
   store: import("./vault/graph-store.js").VaultGraphStore;
+  search: import("./vault/search.js").VaultGraphSearch;
   db: any;
 }> {
   if (_vaultStoreCache) return _vaultStoreCache;
@@ -169,8 +121,10 @@ async function getSharedVaultStore(): Promise<{
   const db = new Database(getStorePath());
   db.pragma("journal_mode = WAL");
   const { VaultGraphStore } = await import("./vault/graph-store.js");
+  const { VaultGraphSearch } = await import("./vault/search.js");
   const store = new VaultGraphStore(db);
-  _vaultStoreCache = { store, db };
+  const search = new VaultGraphSearch(store);
+  _vaultStoreCache = { store, search, db };
 
   // Auto-index current project as vault on first access (once per session)
   if (!_projectVaultIndexed && process.env.CTX_AUTO_INDEX_PROJECT !== "0") {
@@ -183,6 +137,7 @@ async function getSharedVaultStore(): Promise<{
       if (!row || row.cnt === 0) {
         const { indexVault } = await import("./vault/indexer.js");
         const { addVaultConfig } = await import("./vault/config.js");
+        const createVaultAdapter = await getVaultAdapter();
         const adapter = createVaultAdapter(store, projectDir);
         const result = indexVault(projectDir, adapter);
         // Recalc degrees only for nodes belonging to this project
@@ -426,15 +381,7 @@ function getUpgradeHint(): string {
   return "npm update -g context-mode";
 }
 
-function semverNewer(a: string, b: string): boolean {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] ?? 0) > (pb[i] ?? 0)) return true;
-    if ((pa[i] ?? 0) < (pb[i] ?? 0)) return false;
-  }
-  return false;
-}
+import { semverNewer } from "./lib/semver.js";
 
 function isOutdated(): boolean {
   if (!_latestVersion || _latestVersion === "unknown") return false;
@@ -864,12 +811,12 @@ export function extractSnippet(
   return parts.join("\n\n");
 }
 
-export function formatBatchQueryResults(
+export async function formatBatchQueryResults(
   store: ContentStore,
   queries: string[],
   source: string,
   maxOutput = 80 * 1024,
-): string[] {
+): Promise<string[]> {
   const sections: string[] = [];
   let outputSize = 0;
 
@@ -879,7 +826,7 @@ export function formatBatchQueryResults(
       continue;
     }
 
-    const results = store.searchWithFallback(query, 3, source, undefined, "exact");
+    const results = await store.searchWithFallback(query, 3, source, undefined, "exact");
     sections.push(`## ${query}`);
     sections.push("");
     if (results.length > 0) {
@@ -1241,7 +1188,7 @@ __cm_main().catch(e=>{console.error(e);process.exitCode=1});${background ? '\nse
           trackIndexed(Buffer.byteLength(output));
           return trackResponse("ctx_execute", {
             content: [
-              { type: "text" as const, text: intentSearch(output, intent, isError ? `execute:${language}:error` : `execute:${language}`) },
+              { type: "text" as const, text: await intentSearch(output, intent, isError ? `execute:${language}:error` : `execute:${language}`) },
             ],
             isError,
           });
@@ -1251,7 +1198,7 @@ __cm_main().catch(e=>{console.error(e);process.exitCode=1});${background ? '\nse
           trackIndexed(Buffer.byteLength(output));
           return trackResponse("ctx_execute", {
             content: [
-              { type: "text" as const, text: intentSearch(output, "errors failures exceptions", isError ? `execute:${language}:error` : `execute:${language}`) },
+              { type: "text" as const, text: await intentSearch(output, "errors failures exceptions", isError ? `execute:${language}:error` : `execute:${language}`) },
             ],
             isError,
           });
@@ -1271,7 +1218,7 @@ __cm_main().catch(e=>{console.error(e);process.exitCode=1});${background ? '\nse
         trackIndexed(Buffer.byteLength(stdout));
         return trackResponse("ctx_execute", {
           content: [
-            { type: "text" as const, text: intentSearch(stdout, intent, `execute:${language}`) },
+            { type: "text" as const, text: await intentSearch(stdout, intent, `execute:${language}`) },
           ],
         });
       }
@@ -1326,12 +1273,12 @@ function indexStdout(
 const INTENT_SEARCH_THRESHOLD = 5_000; // bytes — ~80-100 lines
 const LARGE_OUTPUT_THRESHOLD = 102_400; // 100KB — auto-index into FTS5, return pointer
 
-function intentSearch(
+async function intentSearch(
   stdout: string,
   intent: string,
   source: string,
   maxResults: number = 5,
-): string {
+): Promise<string> {
   const totalLines = stdout.split("\n").length;
   const totalBytes = Buffer.byteLength(stdout);
 
@@ -1340,7 +1287,7 @@ function intentSearch(
   const indexed = persistent.indexPlainText(stdout, source);
 
   // Search the persistent store directly (porter → trigram → fuzzy)
-  let results = persistent.searchWithFallback(intent, maxResults, source);
+  let results = await persistent.searchWithFallback(intent, maxResults, source);
 
   // Extract distinctive terms as vocabulary hints for the LLM
   const distinctiveTerms = persistent.getDistinctiveTerms(indexed.sourceId);
@@ -1471,7 +1418,7 @@ server.registerTool(
           trackIndexed(Buffer.byteLength(output));
           return trackResponse("ctx_execute_file", {
             content: [
-              { type: "text" as const, text: intentSearch(output, intent, isError ? `file:${path}:error` : `file:${path}`) },
+              { type: "text" as const, text: await intentSearch(output, intent, isError ? `file:${path}:error` : `file:${path}`) },
             ],
             isError,
           });
@@ -1481,7 +1428,7 @@ server.registerTool(
           trackIndexed(Buffer.byteLength(output));
           return trackResponse("ctx_execute_file", {
             content: [
-              { type: "text" as const, text: intentSearch(output, "errors failures exceptions", isError ? `file:${path}:error` : `file:${path}`) },
+              { type: "text" as const, text: await intentSearch(output, "errors failures exceptions", isError ? `file:${path}:error` : `file:${path}`) },
             ],
             isError,
           });
@@ -1500,7 +1447,7 @@ server.registerTool(
         trackIndexed(Buffer.byteLength(stdout));
         return trackResponse("ctx_execute_file", {
           content: [
-            { type: "text" as const, text: intentSearch(stdout, intent, `file:${path}`) },
+            { type: "text" as const, text: await intentSearch(stdout, intent, `file:${path}`) },
           ],
         });
       }
@@ -1782,9 +1729,11 @@ server.registerTool(
 
       // Open vault graph store once before the loop (shared, cached, auto-indexes project)
       let vaultStore: import("./vault/graph-store.js").VaultGraphStore | null = null;
+      let vaultSearch: import("./vault/search.js").VaultGraphSearch | null = null;
       try {
-        const { store: vs } = await getSharedVaultStore();
+        const { store: vs, search: vs_ } = await getSharedVaultStore();
         vaultStore = vs;
+        vaultSearch = vs_;
       } catch { /* vault graph unavailable — search without it */ }
 
       const configDir = _detectedAdapter?.getConfigDir() ?? (process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));
@@ -1796,9 +1745,9 @@ server.registerTool(
           continue;
         }
 
-        let results;
+        let results: UnifiedSearchResult[];
         if (sort === "timeline") {
-          results = searchAllSources({
+          results = await searchAllSources({
             query: q,
             limit: effectiveLimit,
             store,
@@ -1810,9 +1759,10 @@ server.registerTool(
             configDir,
             adapter: _detectedAdapter ?? undefined,
             vaultStore,
+            vaultSearch,
           });
         } else {
-          results = searchAllSources({
+          results = await searchAllSources({
             query: q,
             limit: effectiveLimit,
             store,
@@ -1823,6 +1773,7 @@ server.registerTool(
             configDir,
             adapter: _detectedAdapter ?? undefined,
             vaultStore,
+            vaultSearch,
           });
         }
 
@@ -1833,8 +1784,8 @@ server.registerTool(
 
         const formatted = results
           .map((r, i) => {
-            const origin = (r as any).origin || "current-session";
-            const ts = (r as any).timestamp ? (r as any).timestamp.slice(0, 16).replace("T", " ") : "";
+            const origin = r.origin || "current-session";
+            const ts = r.timestamp ? r.timestamp.slice(0, 16).replace("T", " ") : "";
             const header = `--- [${origin}${ts ? " | " + ts : ""} | ${r.source}] ---`;
             const heading = `### ${r.title}`;
             const snippet = extractSnippet(r.content, q, 1500, r.highlighted);
@@ -2564,7 +2515,7 @@ server.registerTool(
 
       // Run all search queries — source scoped only.
       // Cross-source search remains available via explicit ctx_search().
-      const queryResults = formatBatchQueryResults(store, queries, source);
+      const queryResults = await formatBatchQueryResults(store, queries, source);
 
       // Get searchable terms for edge cases where follow-up is needed
       const distinctiveTerms = store.getDistinctiveTerms
@@ -3202,8 +3153,9 @@ server.registerTool(
 // ─────────────────────────────────────────────────────────
 
 /**
- * Open the shared vault graph store using the same DB path as ContentStore.
- * Uses the graph-store.ts VaultGraphStore (the one search.ts depends on).
+ * Create a new (non-shared) vault graph store using the same DB path as ContentStore.
+ * Each call opens a separate DB connection — callers must close it when done.
+ * For the shared/cached instance, see getSharedVaultStore().
  */
 async function getVaultStore() {
   const Database = loadDatabase();
@@ -3268,48 +3220,8 @@ server.registerTool(
       const { store, db } = await getVaultStore();
       try {
         // Adapter: wrap graph-store.ts VaultGraphStore to match indexer's VaultGraphStore interface
-        const adapter: import("./vault/indexer.js").VaultGraphStore = {
-          getNode: (path: string) => {
-            const n = store.getNodeByPath(path);
-            return n ? {
-              path: n.note_path,
-              title: n.title,
-              frontmatter: n.frontmatter ? JSON.parse(n.frontmatter) : {},
-              tags: store.getTagsByNode(n.id).map((t: { tag: string }) => t.tag),
-              contentHash: n.content_hash,
-              mtimeMs: n.file_mtime,
-              inDegree: n.in_degree,
-            } : undefined;
-          },
-          upsertNode: (node) => {
-            const fm = node.frontmatter && Object.keys(node.frontmatter).length > 0
-              ? JSON.stringify(node.frontmatter) : null;
-            const id = store.upsertNode("", node.path, node.title, fm, node.contentHash, node.mtimeMs, null);
-            // Insert inline tags into vault_tags table
-            store.deleteTagsByNode(id);
-            for (const tag of node.tags ?? []) {
-              store.insertTag(tag, id);
-            }
-          },
-          upsertEdge: (edge) => {
-            const sourceNode = store.getNodeByPath(edge.sourcePath);
-            const targetNode = edge.targetPath ? store.getNodeByPath(edge.targetPath) : null;
-            if (!sourceNode) return;
-            store.insertEdge(
-              sourceNode.id,
-              targetNode?.id ?? null,
-              edge.targetName ?? edge.targetPath ?? edge.sourcePath,
-              edge.alias ?? null,
-              edge.lineNumber,
-              edge.context ?? null,
-              edge.linkType,
-            );
-          },
-          removeEdgesFrom: (sourcePath: string) => {
-            const node = store.getNodeByPath(sourcePath);
-            if (node) store.deleteEdgesBySource(node.id);
-          },
-        };
+        const createVaultAdapterFn = await getVaultAdapter();
+        const adapter = createVaultAdapterFn(store, vaultPath);
 
         // Reindex: clear all vault tables if requested
         if (args.options?.reindex) {
@@ -3322,6 +3234,7 @@ server.registerTool(
           // Invalidate the shared cache so the next getSharedVaultStore() call
           // rebuilds prepared statements against the newly emptied tables.
           _vaultStoreCache = null;
+          _projectVaultIndexed = false;
         }
 
         const result = indexVault(vaultPath, adapter);
@@ -3331,6 +3244,9 @@ server.registerTool(
         for (const { id } of nodeIds) {
           store.recalcDegrees(id);
         }
+
+        // Invalidate PageRank cache in shared store if it exists
+        if (_vaultStoreCache?.search) _vaultStoreCache.search.invalidateCache();
 
         const edgeCount = store.getEdgeCount();
 
@@ -3375,6 +3291,7 @@ server.registerTool(
     inputSchema: z.object({
       mode: z.enum(["neighbors", "backlinks", "tag-cluster"]).describe("Graph traversal mode"),
       nodePath: z.string().optional().describe("Path to vault note (relative to vault root)"),
+      vaultPath: z.string().optional().describe("Absolute vault path to disambiguate nodes in multi-vault setups"),
       tag: z.string().optional().describe("Tag to cluster around (for tag-cluster mode)"),
       maxHops: z.number().min(1).max(5).optional().default(1).describe("Max hops for neighbor traversal"),
       limit: z.number().min(1).max(100).optional().default(20).describe("Max results"),
@@ -3382,16 +3299,19 @@ server.registerTool(
   },
   async (args) => {
     try {
-      const { VaultGraphSearch } = await import("./vault/search.js");
+      // Use shared vault store + cached search (auto-indexes project on first access)
+      const { store, search } = await getSharedVaultStore();
 
-      // Use shared vault store (auto-indexes project on first access)
-      const { store } = await getSharedVaultStore();
-      const search = new VaultGraphSearch(store);
+      /** Resolve node by vaultPath+nodePath when vaultPath is provided, otherwise by notePath alone. */
+      const resolveNode = (nodePath: string) =>
+        args.vaultPath
+          ? store.getNodeByPath(args.vaultPath, nodePath)
+          : store.getNodeByNotePath(nodePath);
 
       let results: import("./types.js").GraphSearchResult[] = [];
 
       if (args.mode === "neighbors" && args.nodePath) {
-        const node = store.getNodeByPath(args.nodePath);
+        const node = resolveNode(args.nodePath);
         if (!node) {
           return trackResponse("ctx_vault_graph", {
             content: [{ type: "text" as const, text: `Node not found: ${args.nodePath}` }],
@@ -3400,7 +3320,7 @@ server.registerTool(
         }
         results = search.neighbors(node.id, args.maxHops).slice(0, args.limit);
       } else if (args.mode === "backlinks" && args.nodePath) {
-        const node = store.getNodeByPath(args.nodePath);
+        const node = resolveNode(args.nodePath);
         if (!node) {
           return trackResponse("ctx_vault_graph", {
             content: [{ type: "text" as const, text: `Node not found: ${args.nodePath}` }],
@@ -3454,6 +3374,7 @@ async function main() {
     if (_vaultStoreCache) {
       try { _vaultStoreCache.db.close(); } catch { /* best effort */ }
       _vaultStoreCache = null;
+      _projectVaultIndexed = false;
     }
     try { unlinkSync(CM_FS_PRELOAD); } catch { /* best effort */ }
     // Remove MCP readiness sentinel (#230)

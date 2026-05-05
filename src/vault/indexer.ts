@@ -7,11 +7,12 @@
  */
 
 import { readdirSync, statSync, readFileSync, lstatSync } from "node:fs";
-import { join, relative, normalize, resolve, extname } from "node:path";
+import { join, relative, resolve, extname } from "node:path";
 import { createHash } from "node:crypto";
 import { parseVaultNote } from "./parser.js";
 import { parseCodeFile, type ParsedCodeFile } from "./code-parser.js";
 import { resolveLink } from "./resolver.js";
+import { normalizePath } from "./path-utils.js";
 
 // ─────────────────────────────────────────────────────────
 // File reading with encoding fallback
@@ -411,10 +412,3 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
   return result;
 }
 
-// ─────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────
-
-function normalizePath(p: string): string {
-  return normalize(p).replace(/\\/g, "/");
-}

@@ -11,7 +11,7 @@
 import type { Database as DatabaseInstance } from "better-sqlite3";
 import { loadDatabase, applyWALPragmas, closeDB, cleanOrphanedWALFiles, withRetry, deleteDBFiles, isSQLiteCorruptionError } from "./db-base.js";
 import type { PreparedStatement } from "./db-base.js";
-import { readFileSync, readdirSync, unlinkSync, existsSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, unlinkSync, existsSync, statSync, createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1165,15 +1165,15 @@ export class ContentStore {
 
   // ── Unified Fallback Search ──
 
-  searchWithFallback(
+  async searchWithFallback(
     query: string,
     limit: number = 3,
     source?: string,
     contentType?: "code" | "prose",
     sourceMatchMode: SourceMatchMode = "like",
-  ): SearchResult[] {
+  ): Promise<SearchResult[]> {
     // Step 0: Auto-refresh stale file-backed sources before searching
-    this.#refreshStaleSources();
+    await this.#refreshStaleSources();
 
     // Step 1: RRF fusion (porter OR + trigram OR → merge)
     const rrfResults = this.#rrfSearch(query, limit, source, contentType, sourceMatchMode);
@@ -1212,8 +1212,9 @@ export class ContentStore {
    * Check all file-backed sources for staleness and auto re-index changed files.
    * Uses mtime as a fast gate — only computes SHA-256 when mtime has advanced
    * past indexed_at. Gracefully skips deleted files and non-file sources.
+   * Uses streaming hash to avoid blocking the event loop on large files.
    */
-  #refreshStaleSources(): void {
+  async #refreshStaleSources(): Promise<void> {
     this.lastRefreshCount = 0;
     const sources = this.#db.prepare(
       "SELECT label, file_path, content_hash, indexed_at FROM sources WHERE file_path IS NOT NULL",
@@ -1226,9 +1227,14 @@ export class ContentStore {
         const indexedAt = new Date(src.indexed_at + "Z");
         if (mtime <= indexedAt) continue; // file unchanged — fast path
 
-        // mtime advanced — check hash to confirm real change (not just touch)
-        const newContent = readFileSync(src.file_path, "utf-8");
-        const newHash = createHash("sha256").update(newContent).digest("hex");
+        // mtime advanced — stream-hash to confirm real change (not just touch)
+        const newHash = await new Promise<string>((resolve, reject) => {
+          const hash = createHash("sha256");
+          createReadStream(src.file_path)
+            .on("data", (chunk: string | Buffer) => hash.update(chunk))
+            .on("end", () => resolve(hash.digest("hex")))
+            .on("error", reject);
+        });
         if (newHash === src.content_hash) continue; // content identical — skip
 
         // File genuinely changed — re-index

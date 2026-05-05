@@ -9,7 +9,7 @@
 import type { ContentStore, SearchResult } from "../store.js";
 import type { SessionDB, StoredEvent } from "../session/db.js";
 import type { VaultGraphStore } from "../vault/graph-store.js";
-import { VaultGraphSearch } from "../vault/search.js";
+import type { VaultGraphSearch } from "../vault/search.js";
 import { searchAutoMemory, type AutoMemoryAdapter } from "./auto-memory.js";
 
 const DEBUG = process.env.DEBUG?.includes("context-mode");
@@ -42,7 +42,9 @@ export interface SearchAllSourcesOpts {
   configDir?: string;
   /** Detected platform adapter — used for adapter-aware auto-memory. */
   adapter?: AutoMemoryAdapter;
-  /** Vault graph store — when present, enables vault-graph fusion results. */
+  /** Vault graph search — when present, enables vault-graph fusion results with PageRank cache. */
+  vaultSearch?: VaultGraphSearch | null;
+  /** Vault graph store — needed for timestamp lookups on vault results. */
   vaultStore?: VaultGraphStore | null;
 }
 
@@ -58,8 +60,12 @@ export interface SearchAllSourcesOpts {
  *
  * Errors in any single source are caught and logged — partial results
  * are always returned.
+ *
+ * Sources 1 (ContentStore), 2 (SessionDB), and 3 (auto-memory) run in
+ * parallel via Promise.allSettled. Source 4 (vault-graph) runs after
+ * source 1 because fusionSearch depends on ContentStore results.
  */
-export function searchAllSources(opts: SearchAllSourcesOpts): UnifiedSearchResult[] {
+export async function searchAllSources(opts: SearchAllSourcesOpts): Promise<UnifiedSearchResult[]> {
   const {
     query,
     limit,
@@ -71,75 +77,86 @@ export function searchAllSources(opts: SearchAllSourcesOpts): UnifiedSearchResul
     projectDir,
     configDir,
     adapter,
+    vaultSearch,
     vaultStore,
   } = opts;
-
-  const results: UnifiedSearchResult[] = [];
 
   // Capture session start time once — used as proxy for ContentStore items
   // (we don't know exact indexing time, but all content is from current session)
   const sessionStartTime = new Date().toISOString();
 
-  // ── Source 1: ContentStore (always, both modes) ──
-  let storeResults: SearchResult[] = [];
-  try {
-    storeResults = store.searchWithFallback(query, limit, source, contentType);
-    results.push(
-      ...storeResults.map((r: SearchResult) => ({
-        title: r.title,
-        content: r.content,
-        source: r.source,
-        origin: "current-session" as const,
-        timestamp: r.timestamp || sessionStartTime,
-        rank: r.rank,
-        matchLayer: r.matchLayer,
-        highlighted: r.highlighted,
-        contentType: r.contentType,
-      })),
-    );
-  } catch (e) {
-    if (DEBUG) process.stderr.write(`[ctx] ContentStore search failed: ${e}\n`);
-  }
-
-  // ── Sources 2+3: timeline mode only ──
-  if (sort === "timeline") {
-    // Source 2: SessionDB — prior session events
-    try {
-      if (sessionDB) {
-        const dbResults = sessionDB.searchEvents(query, limit, projectDir || "", source);
-        results.push(
-          ...dbResults.map((r: Pick<StoredEvent, "id" | "session_id" | "category" | "type" | "data" | "created_at">) => ({
-            title: `[${r.category}] ${r.type}`,
-            content: r.data,
-            source: "prior-session",
-            origin: "prior-session" as const,
-            timestamp: r.created_at,
-          })),
-        );
+  // ── Sources 1, 2, 3: run in parallel ──
+  const [s1, s2, s3] = await Promise.allSettled([
+    // Source 1: ContentStore (always, both modes)
+    (async () => {
+      try {
+        const storeResults = await store.searchWithFallback(query, limit, source, contentType);
+        const unified = storeResults.map((r: SearchResult) => ({
+          title: r.title,
+          content: r.content,
+          source: r.source,
+          origin: "current-session" as const,
+          timestamp: r.timestamp || sessionStartTime,
+          rank: r.rank,
+          matchLayer: r.matchLayer,
+          highlighted: r.highlighted,
+          contentType: r.contentType,
+        }));
+        return { storeResults, unified };
+      } catch (e) {
+        if (DEBUG) process.stderr.write(`[ctx] ContentStore search failed: ${e}\n`);
+        return { storeResults: [] as SearchResult[], unified: [] as UnifiedSearchResult[] };
       }
-    } catch (e) {
-      if (DEBUG) process.stderr.write(`[ctx] SessionDB search failed: ${e}\n`);
-    }
+    })(),
 
-    // Source 3: Auto-memory
-    try {
-      const memResults = searchAutoMemory([query], limit, projectDir, configDir, adapter);
-      results.push(...memResults);
-    } catch (e) {
-      if (DEBUG) process.stderr.write(`[ctx] auto-memory search failed: ${e}\n`);
-    }
-  }
+    // Source 2: SessionDB — prior session events (timeline mode only)
+    (async () => {
+      if (sort !== "timeline" || !sessionDB) return [] as UnifiedSearchResult[];
+      try {
+        const dbResults = sessionDB.searchEvents(query, limit, projectDir || "", source);
+        return dbResults.map((r: Pick<StoredEvent, "id" | "session_id" | "category" | "type" | "data" | "created_at">) => ({
+          title: `[${r.category}] ${r.type}`,
+          content: r.data,
+          source: "prior-session",
+          origin: "prior-session" as const,
+          timestamp: r.created_at,
+        }));
+      } catch (e) {
+        if (DEBUG) process.stderr.write(`[ctx] SessionDB search failed: ${e}\n`);
+        return [];
+      }
+    })(),
 
-  // ── Source 4: Vault-graph (both modes, when vaultStore present) ──
-  if (vaultStore) {
+    // Source 3: Auto-memory (timeline mode only)
+    (async () => {
+      if (sort !== "timeline") return [] as UnifiedSearchResult[];
+      try {
+        return searchAutoMemory([query], limit, projectDir, configDir, adapter);
+      } catch (e) {
+        if (DEBUG) process.stderr.write(`[ctx] auto-memory search failed: ${e}\n`);
+        return [];
+      }
+    })(),
+  ]);
+
+  // Extract parallel results
+  const storeResults = s1.status === "fulfilled" ? s1.value.storeResults : [];
+  const results: UnifiedSearchResult[] = [
+    ...(s1.status === "fulfilled" ? s1.value.unified : []),
+    ...(s2.status === "fulfilled" ? s2.value : []),
+    ...(s3.status === "fulfilled" ? s3.value : []),
+  ];
+
+  // ── Source 4: Vault-graph (both modes, when vaultSearch present) ──
+  // Runs after source 1 — fusionSearch needs storeResults.
+  if (vaultSearch) {
     try {
-      const graphSearch = new VaultGraphSearch(vaultStore);
-      const graphResults = graphSearch.fusionSearch(query, storeResults);
+      const graphResults = vaultSearch.fusionSearch(query, storeResults);
 
       if (sort === "timeline") {
         // Timeline mode: interleave vault results by indexed_at timestamp
         for (const gr of graphResults) {
-          const node = vaultStore.getNodeById(gr.id);
+          const node = vaultStore?.getNodeById(gr.id);
           const timestamp = node?.indexed_at;
           results.push({
             title: gr.title,

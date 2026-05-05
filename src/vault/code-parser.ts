@@ -7,7 +7,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { join, normalize, relative } from "node:path";
+import { join, relative } from "node:path";
+import { normalizePath } from "./path-utils.js";
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -164,12 +165,23 @@ export function parseCodeFile(
     ? filePath.substring(0, filePath.lastIndexOf("/"))
     : "";
 
+  // Construct RegExp objects once (avoid per-line allocation)
+  const staticRe = new RegExp(STATIC_IMPORT_RE.source, STATIC_IMPORT_RE.flags);
+  const dynamicRe = new RegExp(DYNAMIC_IMPORT_RE.source, DYNAMIC_IMPORT_RE.flags);
+  const requireRe = new RegExp(REQUIRE_RE.source, REQUIRE_RE.flags);
+  const exportRe = new RegExp(EXPORT_FROM_RE.source, EXPORT_FROM_RE.flags);
+
   for (let i = 0; i < lines.length; i++) {
     const lineText = lines[i];
 
+    // Reset lastIndex before each line (global-flag regexes are stateful)
+    staticRe.lastIndex = 0;
+    dynamicRe.lastIndex = 0;
+    requireRe.lastIndex = 0;
+    exportRe.lastIndex = 0;
+
     // Static imports: import ... from '...'
     let match: RegExpExecArray | null;
-    const staticRe = new RegExp(STATIC_IMPORT_RE.source, STATIC_IMPORT_RE.flags);
     while ((match = staticRe.exec(lineText)) !== null) {
       const specifier = match[1];
       const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
@@ -184,7 +196,6 @@ export function parseCodeFile(
     }
 
     // Dynamic imports: import('...')
-    const dynamicRe = new RegExp(DYNAMIC_IMPORT_RE.source, DYNAMIC_IMPORT_RE.flags);
     while ((match = dynamicRe.exec(lineText)) !== null) {
       const specifier = match[1];
       const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
@@ -199,7 +210,6 @@ export function parseCodeFile(
     }
 
     // require() calls
-    const requireRe = new RegExp(REQUIRE_RE.source, REQUIRE_RE.flags);
     while ((match = requireRe.exec(lineText)) !== null) {
       const specifier = match[1];
       const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
@@ -214,7 +224,6 @@ export function parseCodeFile(
     }
 
     // export-from: export { ... } from '...' or export * from '...'
-    const exportRe = new RegExp(EXPORT_FROM_RE.source, EXPORT_FROM_RE.flags);
     while ((match = exportRe.exec(lineText)) !== null) {
       const specifier = match[1];
       const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
@@ -238,10 +247,3 @@ export function parseCodeFile(
   };
 }
 
-// ─────────────────────────────────────────────────────────
-// Helpers (shared)
-// ─────────────────────────────────────────────────────────
-
-function normalizePath(p: string): string {
-  return normalize(p).replace(/\\/g, "/");
-}

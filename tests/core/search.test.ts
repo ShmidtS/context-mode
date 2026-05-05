@@ -40,14 +40,14 @@ function createStore(): ContentStore {
 // ═══════════════════════════════════════════════════════════
 
 describe("Fix 1: searchWithFallback cascade on persistent store", () => {
-  test("searchWithFallback: porter layer returns results with matchLayer='rrf'", () => {
+  test("searchWithFallback: porter layer returns results with matchLayer='rrf'", async () => {
     const store = createStore();
     store.indexPlainText(
       "The authentication middleware validates JWT tokens on every request.\nExpired tokens are rejected with 401.",
       "execute:shell",
     );
 
-    const results = store.searchWithFallback("authentication JWT tokens", 3, "execute:shell");
+    const results = await store.searchWithFallback("authentication JWT tokens", 3, "execute:shell");
     assert.ok(results.length > 0, "Porter should find exact terms");
     assert.equal(results[0].matchLayer, "rrf", "matchLayer should be 'rrf'");
     assert.ok(results[0].content.includes("JWT"), "Content should contain JWT");
@@ -55,7 +55,7 @@ describe("Fix 1: searchWithFallback cascade on persistent store", () => {
     store.close();
   });
 
-  test("searchWithFallback: trigram layer activates when porter fails", () => {
+  test("searchWithFallback: trigram layer activates when porter fails", async () => {
     const store = createStore();
     store.indexPlainText(
       "The responseBodyParser transforms incoming XML payloads into JSON.\nAll endpoints accept application/xml.",
@@ -63,14 +63,14 @@ describe("Fix 1: searchWithFallback cascade on persistent store", () => {
     );
 
     // "responseBody" is a substring of "responseBodyParser" — porter won't match, trigram will
-    const results = store.searchWithFallback("responseBody", 3, "execute:shell");
+    const results = await store.searchWithFallback("responseBody", 3, "execute:shell");
     assert.ok(results.length > 0, "Trigram should find substring match");
     assert.equal(results[0].matchLayer, "rrf", "matchLayer should be 'rrf'");
 
     store.close();
   });
 
-  test("searchWithFallback: fuzzy layer corrects misspellings", () => {
+  test("searchWithFallback: fuzzy layer corrects misspellings", async () => {
     const store = createStore();
     store.indexPlainText(
       "PostgreSQL database connection established successfully.\nConnection pool size: 10.",
@@ -78,7 +78,7 @@ describe("Fix 1: searchWithFallback cascade on persistent store", () => {
     );
 
     // "databse" is a typo for "database"
-    const results = store.searchWithFallback("databse", 3, "execute:shell");
+    const results = await store.searchWithFallback("databse", 3, "execute:shell");
     assert.ok(results.length > 0, "Fuzzy should correct 'databse' to 'database'");
     assert.equal(results[0].matchLayer, "rrf-fuzzy", "matchLayer should be 'rrf-fuzzy'");
     assert.ok(results[0].content.toLowerCase().includes("database"), "Content should have 'database'");
@@ -86,7 +86,7 @@ describe("Fix 1: searchWithFallback cascade on persistent store", () => {
     store.close();
   });
 
-  test("searchWithFallback: cascade stops at first successful layer", () => {
+  test("searchWithFallback: cascade stops at first successful layer", async () => {
     const store = createStore();
     store.indexPlainText(
       "Redis cache hit rate: 95%\nMemcached fallback rate: 3%",
@@ -94,14 +94,14 @@ describe("Fix 1: searchWithFallback cascade on persistent store", () => {
     );
 
     // "redis" is an exact term — should stop at RRF, never try fuzzy
-    const results = store.searchWithFallback("redis cache", 3, "execute:shell");
+    const results = await store.searchWithFallback("redis cache", 3, "execute:shell");
     assert.ok(results.length > 0, "Should find results");
     assert.equal(results[0].matchLayer, "rrf", "Should stop at RRF when it succeeds");
 
     store.close();
   });
 
-  test("searchWithFallback: returns empty array when all layers fail", () => {
+  test("searchWithFallback: returns empty array when all layers fail", async () => {
     const store = createStore();
     store.indexPlainText(
       "Server listening on port 8080\nHealth check endpoint ready",
@@ -109,7 +109,7 @@ describe("Fix 1: searchWithFallback cascade on persistent store", () => {
     );
 
     // Completely unrelated terms that no layer can match
-    const results = store.searchWithFallback("xylophoneZebraQuartz", 3, "execute:shell");
+    const results = await store.searchWithFallback("xylophoneZebraQuartz", 3, "execute:shell");
     assert.equal(results.length, 0, "Should return empty when nothing matches");
 
     store.close();
@@ -117,7 +117,7 @@ describe("Fix 1: searchWithFallback cascade on persistent store", () => {
 });
 
 describe("Fix 2: persistent store replaces ephemeral DB correctly", () => {
-  test("persistent store with source scoping isolates results like ephemeral DB did", () => {
+  test("persistent store with source scoping isolates results like ephemeral DB did", async () => {
     const store = createStore();
 
     // Simulate two consecutive intentSearch calls indexing different outputs
@@ -131,7 +131,7 @@ describe("Fix 2: persistent store replaces ephemeral DB correctly", () => {
     );
 
     // Scoped search for the error source should only return error content
-    const errorResults = store.searchWithFallback("401 timeout", 3, "execute:typescript:error");
+    const errorResults = await store.searchWithFallback("401 timeout", 3, "execute:typescript:error");
     assert.ok(errorResults.length > 0, "Should find error content");
     assert.ok(
       errorResults.every(r => r.source.includes("error")),
@@ -139,7 +139,7 @@ describe("Fix 2: persistent store replaces ephemeral DB correctly", () => {
     );
 
     // Scoped search for the success source should only return success content
-    const successResults = store.searchWithFallback("tests passed", 3, "execute:shell");
+    const successResults = await store.searchWithFallback("tests passed", 3, "execute:shell");
     assert.ok(successResults.length > 0, "Should find success content");
     assert.ok(
       successResults.every(r => r.source.includes("shell")),
@@ -149,7 +149,7 @@ describe("Fix 2: persistent store replaces ephemeral DB correctly", () => {
     store.close();
   });
 
-  test("persistent store accumulates content across multiple indexPlainText calls", () => {
+  test("persistent store accumulates content across multiple indexPlainText calls", async () => {
     const store = createStore();
 
     store.indexPlainText("Error log from first command", "cmd-1");
@@ -157,11 +157,11 @@ describe("Fix 2: persistent store replaces ephemeral DB correctly", () => {
     store.indexPlainText("Error log from third command", "cmd-3");
 
     // Global search (no source filter) should find content from all sources
-    const allResults = store.searchWithFallback("error log", 10);
+    const allResults = await store.searchWithFallback("error log", 10);
     assert.ok(allResults.length >= 3, `Should find content from all 3 sources, got ${allResults.length}`);
 
     // Source-scoped search should be precise
-    const cmd2Only = store.searchWithFallback("error log", 3, "cmd-2");
+    const cmd2Only = await store.searchWithFallback("error log", 3, "cmd-2");
     assert.ok(cmd2Only.length > 0, "Should find cmd-2 results");
     assert.ok(
       cmd2Only.every(r => r.source.includes("cmd-2")),
@@ -173,7 +173,7 @@ describe("Fix 2: persistent store replaces ephemeral DB correctly", () => {
 });
 
 describe("Fix 3: batch_execute search precision (no indiscriminate boosting)", () => {
-  test("searchWithFallback returns only relevant results, not everything", () => {
+  test("searchWithFallback returns only relevant results, not everything", async () => {
     const store = createStore();
 
     // Simulate batch_execute with multiple command outputs indexed
@@ -191,7 +191,7 @@ describe("Fix 3: batch_execute search precision (no indiscriminate boosting)", (
     });
 
     // Query for "memory leak" should return git log, NOT disk usage or network
-    const results = store.searchWithFallback("memory leak WebSocket", 3);
+    const results = await store.searchWithFallback("memory leak WebSocket", 3);
     assert.ok(results.length > 0, "Should find git log content");
     assert.ok(
       results[0].content.includes("memory leak") || results[0].content.includes("WebSocket"),
@@ -207,7 +207,7 @@ describe("Fix 3: batch_execute search precision (no indiscriminate boosting)", (
     store.close();
   });
 
-  test("searchWithFallback with source scoping is more precise than global", () => {
+  test("searchWithFallback with source scoping is more precise than global", async () => {
     const store = createStore();
 
     store.index({
@@ -220,14 +220,14 @@ describe("Fix 3: batch_execute search precision (no indiscriminate boosting)", (
     });
 
     // Scoped search for "42" should return only the matching source
-    const buildResults = store.searchWithFallback("TypeScript files compiled", 3, "batch:build");
+    const buildResults = await store.searchWithFallback("TypeScript files compiled", 3, "batch:build");
     assert.ok(buildResults.length > 0, "Should find build output");
     assert.ok(
       buildResults.every(r => r.source.includes("build")),
       "All results should be from build source",
     );
 
-    const testResults = store.searchWithFallback("tests passed coverage", 3, "batch:test");
+    const testResults = await store.searchWithFallback("tests passed coverage", 3, "batch:test");
     assert.ok(testResults.length > 0, "Should find test output");
     assert.ok(
       testResults.every(r => r.source.includes("test")),
@@ -239,7 +239,7 @@ describe("Fix 3: batch_execute search precision (no indiscriminate boosting)", (
 });
 
 describe("Fix 4: transaction-wrapped vocabulary insertion", () => {
-  test("vocabulary is correctly stored after transaction-wrapped insertion", () => {
+  test("vocabulary is correctly stored after transaction-wrapped insertion", async () => {
     const store = createStore();
 
     // Index content with distinctive words
@@ -262,7 +262,7 @@ describe("Fix 4: transaction-wrapped vocabulary insertion", () => {
     store.close();
   });
 
-  test("vocabulary handles large word sets without error", () => {
+  test("vocabulary handles large word sets without error", async () => {
     const store = createStore();
 
     // Generate content with many unique words to stress the transaction
@@ -289,7 +289,7 @@ describe("Fix 4: transaction-wrapped vocabulary insertion", () => {
 });
 
 describe("Fix 5: getDistinctiveTerms with .iterate() streaming", () => {
-  test("getDistinctiveTerms produces correct terms with iterate()", () => {
+  test("getDistinctiveTerms produces correct terms with iterate()", async () => {
     const store = createStore();
 
     // Create content with known word frequency patterns
@@ -334,7 +334,7 @@ describe("Fix 5: getDistinctiveTerms with .iterate() streaming", () => {
     store.close();
   });
 
-  test("getDistinctiveTerms returns empty for sources with < 3 chunks", () => {
+  test("getDistinctiveTerms returns empty for sources with < 3 chunks", async () => {
     const store = createStore();
 
     const indexed = store.index({
@@ -348,7 +348,7 @@ describe("Fix 5: getDistinctiveTerms with .iterate() streaming", () => {
     store.close();
   });
 
-  test("getDistinctiveTerms filters terms outside frequency band", () => {
+  test("getDistinctiveTerms filters terms outside frequency band", async () => {
     const store = createStore();
 
     // 10 chunks: minAppearances=2, maxAppearances=max(3, ceil(10*0.4))=4
@@ -385,24 +385,24 @@ describe("Fix 5: getDistinctiveTerms with .iterate() streaming", () => {
 });
 
 describe("Edge cases and hardening", () => {
-  test("searchWithFallback on empty store returns empty", () => {
+  test("searchWithFallback on empty store returns empty", async () => {
     const store = createStore();
-    const results = store.searchWithFallback("anything", 3);
+    const results = await store.searchWithFallback("anything", 3);
     assert.equal(results.length, 0, "Empty store should return empty results");
     store.close();
   });
 
-  test("searchWithFallback with empty query returns empty", () => {
+  test("searchWithFallback with empty query returns empty", async () => {
     const store = createStore();
     store.indexPlainText("Some content here", "test-source");
 
-    const results = store.searchWithFallback("", 3, "test-source");
+    const results = await store.searchWithFallback("", 3, "test-source");
     assert.equal(results.length, 0, "Empty query should return empty results");
 
     store.close();
   });
 
-  test("searchWithFallback source scoping uses LIKE partial match", () => {
+  test("searchWithFallback source scoping uses LIKE partial match", async () => {
     const store = createStore();
 
     store.indexPlainText(
@@ -411,13 +411,13 @@ describe("Edge cases and hardening", () => {
     );
 
     // Partial source match should work
-    const results = store.searchWithFallback("compilation", 3, "TypeScript Build");
+    const results = await store.searchWithFallback("compilation", 3, "TypeScript Build");
     assert.ok(results.length > 0, "Partial source match should find content");
 
     store.close();
   });
 
-  test("searchWithFallback handles special characters in query gracefully", () => {
+  test("searchWithFallback handles special characters in query gracefully", async () => {
     const store = createStore();
     store.indexPlainText(
       "Error in module: TypeError at line 42\nStack trace follows",
@@ -425,15 +425,15 @@ describe("Edge cases and hardening", () => {
     );
 
     // These queries with special chars should not throw
-    assert.doesNotThrow(() => store.searchWithFallback('TypeError "line 42"', 3));
-    assert.doesNotThrow(() => store.searchWithFallback("error (module)", 3));
-    assert.doesNotThrow(() => store.searchWithFallback("stack* trace", 3));
-    assert.doesNotThrow(() => store.searchWithFallback("NOT:something", 3));
+    assert.doesNotThrow(async () => await store.searchWithFallback('TypeError "line 42"', 3));
+    assert.doesNotThrow(async () => await store.searchWithFallback("error (module)", 3));
+    assert.doesNotThrow(async () => await store.searchWithFallback("stack* trace", 3));
+    assert.doesNotThrow(async () => await store.searchWithFallback("NOT:something", 3));
 
     store.close();
   });
 
-  test("searchWithFallback respects limit parameter across all layers", () => {
+  test("searchWithFallback respects limit parameter across all layers", async () => {
     const store = createStore();
 
     // Index enough content for multiple results
@@ -444,10 +444,10 @@ describe("Edge cases and hardening", () => {
       source: "error-log",
     });
 
-    const limited = store.searchWithFallback("TypeError property undefined", 2);
+    const limited = await store.searchWithFallback("TypeError property undefined", 2);
     assert.ok(limited.length <= 2, `Limit 2 should return at most 2 results, got ${limited.length}`);
 
-    const moreLimited = store.searchWithFallback("TypeError property undefined", 1);
+    const moreLimited = await store.searchWithFallback("TypeError property undefined", 1);
     assert.ok(moreLimited.length <= 1, `Limit 1 should return at most 1 result, got ${moreLimited.length}`);
 
     store.close();
@@ -459,7 +459,7 @@ describe("Edge cases and hardening", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("AND semantics (issue #23)", () => {
-  test("multi-word query excludes irrelevant single-word matches", () => {
+  test("multi-word query excludes irrelevant single-word matches", async () => {
     const store = createStore();
 
     // Index two documents — one relevant, one only matches on "function"
@@ -484,7 +484,7 @@ describe("AND semantics (issue #23)", () => {
     store.close();
   });
 
-  test("searchWithFallback uses AND by default, falls back to OR", () => {
+  test("searchWithFallback uses AND by default, falls back to OR", async () => {
     const store = createStore();
 
     store.index({
@@ -498,14 +498,14 @@ describe("AND semantics (issue #23)", () => {
 
     // RRF fuses porter OR + trigram OR — both chunks match on partial terms,
     // but the React chunk ranks higher because it matches all three query terms
-    const results = store.searchWithFallback("useEffect cleanup function", 5);
+    const results = await store.searchWithFallback("useEffect cleanup function", 5);
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0].source).toBe("React Hooks Guide");
 
     store.close();
   });
 
-  test("AND with no results falls back to OR gracefully", () => {
+  test("AND with no results falls back to OR gracefully", async () => {
     const store = createStore();
 
     store.index({
@@ -519,14 +519,14 @@ describe("AND semantics (issue #23)", () => {
 
     // "React useState hooks" — AND would match nothing (no chunk has all 3),
     // searchWithFallback should fall back to OR and find the React chunk
-    const results = store.searchWithFallback("React useState hooks", 5);
+    const results = await store.searchWithFallback("React useState hooks", 5);
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].source).toBe("React Guide");
 
     store.close();
   });
 
-  test("single-word queries work the same in AND and OR", () => {
+  test("single-word queries work the same in AND and OR", async () => {
     const store = createStore();
 
     store.index({
@@ -541,7 +541,7 @@ describe("AND semantics (issue #23)", () => {
     store.close();
   });
 
-  test("trigram search also uses AND semantics", () => {
+  test("trigram search also uses AND semantics", async () => {
     const store = createStore();
 
     store.index({
@@ -569,7 +569,7 @@ describe("AND semantics (issue #23)", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("Source-scoped searchWithFallback (intentSearch path)", () => {
-  test("intentSearch path: porter layer finds exact terms in source-scoped search", () => {
+  test("intentSearch path: porter layer finds exact terms in source-scoped search", async () => {
     const store = createStore();
 
     // Index two different sources (simulates multiple execute calls)
@@ -583,7 +583,7 @@ describe("Source-scoped searchWithFallback (intentSearch path)", () => {
     );
 
     // Source-scoped search should only find results from the target source
-    const results = store.searchWithFallback("connection refused", 3, "cmd-1");
+    const results = await store.searchWithFallback("connection refused", 3, "cmd-1");
     assert.ok(results.length > 0, "Should find results in cmd-1");
     assert.ok(
       results[0].content.includes("connection refused"),
@@ -592,13 +592,13 @@ describe("Source-scoped searchWithFallback (intentSearch path)", () => {
     assert.equal(results[0].matchLayer, "rrf", "Should match via RRF layer");
 
     // Should NOT leak results from other sources
-    const wrongSource = store.searchWithFallback("connection refused", 3, "cmd-2");
+    const wrongSource = await store.searchWithFallback("connection refused", 3, "cmd-2");
     assert.equal(wrongSource.length, 0, "Should not find database errors in test output source");
 
     store.close();
   });
 
-  test("intentSearch path: trigram layer activates for partial/camelCase terms", () => {
+  test("intentSearch path: trigram layer activates for partial/camelCase terms", async () => {
     const store = createStore();
 
     store.indexPlainText(
@@ -607,7 +607,7 @@ describe("Source-scoped searchWithFallback (intentSearch path)", () => {
     );
 
     // "horizontalPod" is a partial camelCase term — porter won't match, trigram will
-    const results = store.searchWithFallback("horizontalPod", 3, "cmd-1");
+    const results = await store.searchWithFallback("horizontalPod", 3, "cmd-1");
     assert.ok(results.length > 0, "Trigram should find partial camelCase match");
     assert.ok(
       results[0].content.includes("horizontalPodAutoscaler"),
@@ -618,7 +618,7 @@ describe("Source-scoped searchWithFallback (intentSearch path)", () => {
     store.close();
   });
 
-  test("intentSearch path: fuzzy layer activates for typos", () => {
+  test("intentSearch path: fuzzy layer activates for typos", async () => {
     const store = createStore();
 
     store.indexPlainText(
@@ -627,7 +627,7 @@ describe("Source-scoped searchWithFallback (intentSearch path)", () => {
     );
 
     // "kuberntes" is a typo for "kubernetes" — fuzzy layer should correct
-    const results = store.searchWithFallback("kuberntes", 3, "cmd-1");
+    const results = await store.searchWithFallback("kuberntes", 3, "cmd-1");
     assert.ok(results.length > 0, "Fuzzy should correct typo and find match");
     assert.ok(
       results[0].content.toLowerCase().includes("kubernetes"),
@@ -638,7 +638,7 @@ describe("Source-scoped searchWithFallback (intentSearch path)", () => {
     store.close();
   });
 
-  test("intentSearch path: no match returns empty (not an error)", () => {
+  test("intentSearch path: no match returns empty (not an error)", async () => {
     const store = createStore();
 
     store.indexPlainText(
@@ -646,7 +646,7 @@ describe("Source-scoped searchWithFallback (intentSearch path)", () => {
       "cmd-1: node server",
     );
 
-    const results = store.searchWithFallback("xylophoneQuartzMango", 3, "cmd-1");
+    const results = await store.searchWithFallback("xylophoneQuartzMango", 3, "cmd-1");
     assert.equal(results.length, 0, "Completely unrelated query should return empty");
 
     store.close();
@@ -654,7 +654,7 @@ describe("Source-scoped searchWithFallback (intentSearch path)", () => {
 });
 
 describe("Multi-source isolation (batch_execute path)", () => {
-  test("batch_execute path: scoped search isolates results per source", () => {
+  test("batch_execute path: scoped search isolates results per source", async () => {
     const store = createStore();
 
     // Simulate batch_execute indexing multiple command outputs
@@ -672,22 +672,22 @@ describe("Multi-source isolation (batch_execute path)", () => {
     });
 
     // Each scoped search should only return results from its source
-    const gitResults = store.searchWithFallback("files changed", 3, "batch: git status");
+    const gitResults = await store.searchWithFallback("files changed", 3, "batch: git status");
     assert.ok(gitResults.length > 0, "Should find git status results");
     assert.ok(gitResults.every(r => r.source.includes("git status")), "All results should be from git status");
 
-    const testResults = store.searchWithFallback("tests passed", 3, "batch: npm test");
+    const testResults = await store.searchWithFallback("tests passed", 3, "batch: npm test");
     assert.ok(testResults.length > 0, "Should find test results");
     assert.ok(testResults.every(r => r.source.includes("npm test")), "All results should be from npm test");
 
     // Global fallback (no source filter) should search across all sources
-    const globalResults = store.searchWithFallback("files", 10);
+    const globalResults = await store.searchWithFallback("files", 10);
     assert.ok(globalResults.length > 0, "Global search should find results");
 
     store.close();
   });
 
-  test("batch_execute path: global fallback when scoped search fails", () => {
+  test("batch_execute path: global fallback when scoped search fails", async () => {
     const store = createStore();
 
     // Index content into one source
@@ -697,17 +697,17 @@ describe("Multi-source isolation (batch_execute path)", () => {
     });
 
     // Scoped search against wrong source returns empty
-    const wrongScope = store.searchWithFallback("JWT tokens", 3, "docs: nonexistent");
+    const wrongScope = await store.searchWithFallback("JWT tokens", 3, "docs: nonexistent");
     assert.equal(wrongScope.length, 0, "Wrong source scope should return empty");
 
     // Global fallback (no source) should find it
-    const globalFallback = store.searchWithFallback("JWT tokens", 3);
+    const globalFallback = await store.searchWithFallback("JWT tokens", 3);
     assert.ok(globalFallback.length > 0, "Global fallback should find the content");
 
     store.close();
   });
 
-  test("batch_execute formatter never inlines previous indexed content", () => {
+  test("batch_execute formatter never inlines previous indexed content", async () => {
     const store = createStore();
 
     store.index({
@@ -719,7 +719,7 @@ describe("Multi-source isolation (batch_execute path)", () => {
       source: "docs: auth",
     });
 
-    const output = formatBatchQueryResults(store, ["JWT tokens"], "batch: current").join("\n");
+    const output = (await formatBatchQueryResults(store, ["JWT tokens"], "batch: current")).join("\n");
     assert.ok(output.includes("No matching sections found."), "Expected scoped batch result to stay empty");
     assert.ok(!output.includes("previously indexed content"), "Should not mention cross-source fallback");
     assert.ok(!output.includes("JWT tokens expire after 24 hours"), "Should not inline stale cross-source text");
@@ -727,7 +727,7 @@ describe("Multi-source isolation (batch_execute path)", () => {
     store.close();
   });
 
-  test("batch_execute formatter does not leak overlapping batch labels", () => {
+  test("batch_execute formatter does not leak overlapping batch labels", async () => {
     const store = createStore();
 
     store.index({
@@ -739,14 +739,14 @@ describe("Multi-source isolation (batch_execute path)", () => {
       source: "batch:Build,Test",
     });
 
-    const output = formatBatchQueryResults(store, ["JWT tokens"], "batch:Build").join("\n");
+    const output = (await formatBatchQueryResults(store, ["JWT tokens"], "batch:Build")).join("\n");
     assert.ok(output.includes("No matching sections found."), "Expected exact batch label filtering");
     assert.ok(!output.includes("JWT tokens expire after 24 hours"), "Should not leak overlapping older batch label content");
 
     store.close();
   });
 
-  test("batch_execute formatter returns matches from the current batch", () => {
+  test("batch_execute formatter returns matches from the current batch", async () => {
     const store = createStore();
 
     store.index({
@@ -758,7 +758,7 @@ describe("Multi-source isolation (batch_execute path)", () => {
       source: "docs: auth",
     });
 
-    const output = formatBatchQueryResults(store, ["JWT tokens"], "batch: current").join("\n");
+    const output = (await formatBatchQueryResults(store, ["JWT tokens"], "batch: current")).join("\n");
     assert.ok(output.includes("Current Batch"), "Expected current batch heading in formatter output");
     assert.ok(output.includes("12 hours for the current batch"), "Expected current batch content in formatter output");
     assert.ok(!output.includes("24 hours"), "Should not leak older source content when current batch matches");
@@ -768,7 +768,7 @@ describe("Multi-source isolation (batch_execute path)", () => {
 });
 
 describe("getDistinctiveTerms consistency (fix #9)", () => {
-  test("getDistinctiveTerms returns terms for multi-chunk content", () => {
+  test("getDistinctiveTerms returns terms for multi-chunk content", async () => {
     const store = createStore();
 
     // getDistinctiveTerms requires chunk_count >= 3 and terms appearing in
@@ -828,7 +828,7 @@ describe("Index deduplication (issue #67)", () => {
     store.cleanup();
   });
 
-  it("re-indexing with same label replaces previous content", () => {
+  it("re-indexing with same label replaces previous content", async () => {
     // First build: error A
     store.index({
       content: "# Build Output\nERROR: Module not found 'foo'",
@@ -856,7 +856,7 @@ describe("Index deduplication (issue #67)", () => {
     expect(results3.length).toBe(0);
   });
 
-  it("different labels are NOT deduped", () => {
+  it("different labels are NOT deduped", async () => {
     store.index({
       content: "# Test Output\n5 tests passed",
       source: "execute:shell:npm test",
@@ -874,7 +874,7 @@ describe("Index deduplication (issue #67)", () => {
     expect(buildResults.length).toBeGreaterThan(0);
   });
 
-  it("sources list shows only one entry per label after dedup", () => {
+  it("sources list shows only one entry per label after dedup", async () => {
     store.index({ content: "# Run 1\nfail", source: "execute:shell:make" });
     store.index({ content: "# Run 2\nfail", source: "execute:shell:make" });
     store.index({ content: "# Run 3\npass", source: "execute:shell:make" });
@@ -885,7 +885,7 @@ describe("Index deduplication (issue #67)", () => {
     expect(makeEntries[0].chunkCount).toBeGreaterThan(0);
   });
 
-  it("dedup works with indexPlainText too", () => {
+  it("dedup works with indexPlainText too", async () => {
     store.indexPlainText("error: old failure", "build-output");
     store.indexPlainText("success: all good", "build-output");
 
@@ -896,7 +896,7 @@ describe("Index deduplication (issue #67)", () => {
     expect(newResults.length).toBeGreaterThan(0);
   });
 
-  it("dedup works with indexJSON too", () => {
+  it("dedup works with indexJSON too", async () => {
     store.indexJSON(
       JSON.stringify({ status: "error", message: "connection refused" }),
       "api-response",
@@ -909,11 +909,11 @@ describe("Index deduplication (issue #67)", () => {
     const oldResults = store.search("connection refused");
     expect(oldResults.length).toBe(0);
 
-    const newResults = store.searchWithFallback("ok", 5);
+    const newResults = await store.searchWithFallback("ok", 5);
     expect(newResults.length).toBeGreaterThan(0);
   });
 
-  it("trigram search also returns only latest content after dedup", () => {
+  it("trigram search also returns only latest content after dedup", async () => {
     store.index({
       content: "# Output\nxyz123oldvalue",
       source: "execute:shell:check",
@@ -924,11 +924,11 @@ describe("Index deduplication (issue #67)", () => {
     });
 
     // Trigram search for old unique substring
-    const oldResults = store.searchWithFallback("xyz123oldvalue", 5);
+    const oldResults = await store.searchWithFallback("xyz123oldvalue", 5);
     expect(oldResults.length).toBe(0);
 
     // Trigram search for new unique substring
-    const newResults = store.searchWithFallback("abc456newvalue", 5);
+    const newResults = await store.searchWithFallback("abc456newvalue", 5);
     expect(newResults.length).toBeGreaterThan(0);
   });
 });
@@ -1043,7 +1043,7 @@ function createSeededStore(): ContentStore {
 }
 
 describe("searchTrigram: Substring Matching", () => {
-  test("searchTrigram: finds substring match ('authenticat' → authentication)", () => {
+  test("searchTrigram: finds substring match ('authenticat' → authentication)", async () => {
     const store = createSeededStore();
     // "authenticat" is a partial substring of "authentication"
     // Porter stemming won't match this — trigram should
@@ -1056,7 +1056,7 @@ describe("searchTrigram: Substring Matching", () => {
     store.close();
   });
 
-  test("searchTrigram: finds partial hyphenated term ('row-level' → row-level-security)", () => {
+  test("searchTrigram: finds partial hyphenated term ('row-level' → row-level-security)", async () => {
     const store = createSeededStore();
     // Partial match on hyphenated compound term
     const results = store.searchTrigram("row-level", 3);
@@ -1069,7 +1069,7 @@ describe("searchTrigram: Substring Matching", () => {
     store.close();
   });
 
-  test("searchTrigram: finds camelCase substring ('useEff' → useEffect)", () => {
+  test("searchTrigram: finds camelCase substring ('useEff' → useEffect)", async () => {
     const store = createSeededStore();
     // "useEff" is a prefix of "useEffect" — trigram should match
     const results = store.searchTrigram("useEff", 3);
@@ -1081,7 +1081,7 @@ describe("searchTrigram: Substring Matching", () => {
     store.close();
   });
 
-  test("searchTrigram: respects source filter", () => {
+  test("searchTrigram: respects source filter", async () => {
     const store = createSeededStore();
     // "cache" appears in both "Caching docs" and potentially elsewhere
     const allResults = store.searchTrigram("cache", 10);
@@ -1101,7 +1101,7 @@ describe("searchTrigram: Substring Matching", () => {
 });
 
 describe("fuzzyCorrect: Levenshtein Typo Correction", () => {
-  test("fuzzyCorrect: corrects single typo ('autentication' → 'authentication')", () => {
+  test("fuzzyCorrect: corrects single typo ('autentication' → 'authentication')", async () => {
     const store = createSeededStore();
     // Missing 'h' — edit distance 1
     const corrected = store.fuzzyCorrect("autentication");
@@ -1114,7 +1114,7 @@ describe("fuzzyCorrect: Levenshtein Typo Correction", () => {
     store.close();
   });
 
-  test("fuzzyCorrect: returns null for exact match (no correction needed)", () => {
+  test("fuzzyCorrect: returns null for exact match (no correction needed)", async () => {
     const store = createSeededStore();
     // Exact word exists in vocabulary — no correction needed
     const corrected = store.fuzzyCorrect("authentication");
@@ -1126,7 +1126,7 @@ describe("fuzzyCorrect: Levenshtein Typo Correction", () => {
     store.close();
   });
 
-  test("fuzzyCorrect: returns null for gibberish (too distant)", () => {
+  test("fuzzyCorrect: returns null for gibberish (too distant)", async () => {
     const store = createSeededStore();
     // Completely unrelated — edit distance too high for any vocabulary word
     const corrected = store.fuzzyCorrect("xyzqwertymno");
@@ -1140,10 +1140,10 @@ describe("fuzzyCorrect: Levenshtein Typo Correction", () => {
 });
 
 describe("searchWithFallback: Three-Layer Cascade", () => {
-  test("searchWithFallback: Layer 1 hit (Porter) — exact stemmed match", () => {
+  test("searchWithFallback: Layer 1 hit (Porter) — exact stemmed match", async () => {
     const store = createSeededStore();
     // "caching" stems to "cach" via Porter — Layer 1 should match directly
-    const results = store.searchWithFallback("caching strategy", 3);
+    const results = await store.searchWithFallback("caching strategy", 3);
     assert.ok(results.length > 0, "Layer 1 (Porter) should find stemmed match");
     assert.ok(
       results[0].content.toLowerCase().includes("cach"),
@@ -1158,10 +1158,10 @@ describe("searchWithFallback: Three-Layer Cascade", () => {
     store.close();
   });
 
-  test("searchWithFallback: Layer 2 hit (Trigram) — partial substring", () => {
+  test("searchWithFallback: Layer 2 hit (Trigram) — partial substring", async () => {
     const store = createSeededStore();
     // "connectionPo" is a partial camelCase — Porter won't match, trigram will
-    const results = store.searchWithFallback("connectionPo", 3);
+    const results = await store.searchWithFallback("connectionPo", 3);
     assert.ok(results.length > 0, "Layer 2 (Trigram) should find substring match");
     assert.ok(
       results[0].content.includes("connectionPool"),
@@ -1175,10 +1175,10 @@ describe("searchWithFallback: Three-Layer Cascade", () => {
     store.close();
   });
 
-  test("searchWithFallback: Layer 3 hit (Fuzzy) — typo correction", () => {
+  test("searchWithFallback: Layer 3 hit (Fuzzy) — typo correction", async () => {
     const store = createSeededStore();
     // "kuberntes" is a typo for "kubernetes" (missing 'e')
-    const results = store.searchWithFallback("kuberntes", 3);
+    const results = await store.searchWithFallback("kuberntes", 3);
     assert.ok(results.length > 0, "Layer 3 (Fuzzy) should find typo-corrected match");
     assert.ok(
       results[0].content.toLowerCase().includes("kubernetes"),
@@ -1192,19 +1192,19 @@ describe("searchWithFallback: Three-Layer Cascade", () => {
     store.close();
   });
 
-  test("searchWithFallback: no match at any layer returns empty", () => {
+  test("searchWithFallback: no match at any layer returns empty", async () => {
     const store = createSeededStore();
     // Completely unrelated term with no substring or fuzzy match
-    const results = store.searchWithFallback("xylophoneQuartzMango", 3);
+    const results = await store.searchWithFallback("xylophoneQuartzMango", 3);
     assert.equal(results.length, 0, "Should return empty when no layer matches");
     store.close();
   });
 
-  test("searchWithFallback: source filter works across all layers", () => {
+  test("searchWithFallback: source filter works across all layers", async () => {
     const store = createSeededStore();
     // "JWT" exists in both Auth docs and Deployment docs (JWT_SECRET)
     // With source filter, should only return Auth docs
-    const results = store.searchWithFallback("JWT", 5, "Auth");
+    const results = await store.searchWithFallback("JWT", 5, "Auth");
     assert.ok(results.length > 0, "Should find results with source filter");
     assert.ok(
       results.every((r) => r.source.includes("Auth")),
@@ -1215,14 +1215,14 @@ describe("searchWithFallback: Three-Layer Cascade", () => {
 });
 
 describe("Fuzzy Edge Cases", () => {
-  test("searchTrigram: empty query returns empty", () => {
+  test("searchTrigram: empty query returns empty", async () => {
     const store = createSeededStore();
     const results = store.searchTrigram("", 3);
     assert.equal(results.length, 0, "Empty query should return no results");
     store.close();
   });
 
-  test("searchTrigram: very short query (2 chars) still works", () => {
+  test("searchTrigram: very short query (2 chars) still works", async () => {
     const store = createSeededStore();
     // "JS" or "k8" — trigram needs at least 3 chars to form a trigram
     // but the API should handle gracefully (return empty or degrade)
@@ -1232,7 +1232,7 @@ describe("Fuzzy Edge Cases", () => {
     store.close();
   });
 
-  test("fuzzyCorrect: handles multi-word query (corrects each word)", () => {
+  test("fuzzyCorrect: handles multi-word query (corrects each word)", async () => {
     const store = createSeededStore();
     // "autentication middlewre" — two typos
     const corrected = store.fuzzyCorrect("autentication");
@@ -1243,11 +1243,11 @@ describe("Fuzzy Edge Cases", () => {
     store.close();
   });
 
-  test("searchWithFallback: Layer 1 hit skips Layer 2 and 3 (performance)", () => {
+  test("searchWithFallback: Layer 1 hit skips Layer 2 and 3 (performance)", async () => {
     const store = createSeededStore();
     // "Redis" is an exact term — should resolve at Layer 1 only
     const start = performance.now();
-    const results = store.searchWithFallback("Redis", 3);
+    const results = await store.searchWithFallback("Redis", 3);
     const elapsed = performance.now() - start;
     assert.ok(results.length > 0, "Should find Redis content");
     assert.equal(
@@ -1260,7 +1260,7 @@ describe("Fuzzy Edge Cases", () => {
     store.close();
   });
 
-  test("trigram table is populated during index()", () => {
+  test("trigram table is populated during index()", async () => {
     const store = createStore();
     store.index({
       content: "# Test\n\nThe horizontalPodAutoscaler manages pod replicas.",
@@ -1276,7 +1276,7 @@ describe("Fuzzy Edge Cases", () => {
     store.close();
   });
 
-  test("trigram table is populated during indexPlainText()", () => {
+  test("trigram table is populated during indexPlainText()", async () => {
     const store = createStore();
     store.indexPlainText(
       "ERROR: connectionRefused on port 5432\nWARNING: retrying in 5s",
@@ -1293,7 +1293,7 @@ describe("Fuzzy Edge Cases", () => {
 // ─────────────────────────────────────────────────────────
 
 describe("fuzzyCorrect LRU cache", () => {
-  test("returns identical result on repeated queries for the same word", () => {
+  test("returns identical result on repeated queries for the same word", async () => {
     const store = createStore();
     store.index({
       content: "The authentication middleware handles orchestration of services.",
@@ -1309,7 +1309,7 @@ describe("fuzzyCorrect LRU cache", () => {
     store.close();
   });
 
-  test("cache entry for null (no correction) is also returned on hit", () => {
+  test("cache entry for null (no correction) is also returned on hit", async () => {
     const store = createStore();
     store.index({
       content: "one two three four",
@@ -1326,7 +1326,7 @@ describe("fuzzyCorrect LRU cache", () => {
     store.close();
   });
 
-  test("cache is cleared when new vocabulary is inserted", () => {
+  test("cache is cleared when new vocabulary is inserted", async () => {
     const store = createStore();
     store.index({
       content: "authentication middleware orchestration deployment monitoring",
@@ -1350,7 +1350,7 @@ describe("fuzzyCorrect LRU cache", () => {
     store.close();
   });
 
-  test("cache is NOT cleared when re-indexing identical content", () => {
+  test("cache is NOT cleared when re-indexing identical content", async () => {
     const store = createStore();
     store.index({
       content: "authentication middleware orchestration deployment",
@@ -1376,7 +1376,7 @@ describe("fuzzyCorrect LRU cache", () => {
     store.close();
   });
 
-  test("cache respects FUZZY_CACHE_SIZE — eviction does not corrupt results", () => {
+  test("cache respects FUZZY_CACHE_SIZE — eviction does not corrupt results", async () => {
     const store = createStore();
     // Build a vocab with many distinct words so evictions happen during sweep.
     const vocab = Array.from({ length: 50 }, (_, i) => `uniqueword${i}abc`).join(" ");
@@ -1470,7 +1470,7 @@ interface ScenarioResult {
 const scenarioResults: ScenarioResult[] = [];
 
 describe("Scenario 1: Server Log Error (line 347 of 500)", () => {
-  test("server log: intent search finds error buried in middle", () => {
+  test("server log: intent search finds error buried in middle", async () => {
     const lines: string[] = [];
     for (let i = 0; i < 500; i++) {
       if (i === 346) {
@@ -1519,7 +1519,7 @@ describe("Scenario 1: Server Log Error (line 347 of 500)", () => {
 });
 
 describe("Scenario 2: Test Failures (3 among 200 tests)", () => {
-  test("test results: intent search finds all 3 failures", () => {
+  test("test results: intent search finds all 3 failures", async () => {
     const failureLines: Record<number, string> = {
       67: "  \u2717 AuthSuite::testTokenExpiry FAILED - Expected 401 but got 200",
       134: "  \u2717 PaymentSuite::testRefundFlow FAILED - Expected 'refunded' but got 'pending'",
@@ -1573,7 +1573,7 @@ describe("Scenario 2: Test Failures (3 among 200 tests)", () => {
 });
 
 describe("Scenario 3: Build Warnings (2 among 300 lines)", () => {
-  test("build output: intent search finds both deprecation warnings", () => {
+  test("build output: intent search finds both deprecation warnings", async () => {
     const lines: string[] = [];
     for (let i = 0; i < 300; i++) {
       if (i === 88) {
@@ -1626,7 +1626,7 @@ describe("Scenario 3: Build Warnings (2 among 300 lines)", () => {
 });
 
 describe("Scenario 4: API Auth Error (line 743 of 1000)", () => {
-  test("API response: intent search finds authentication error", () => {
+  test("API response: intent search finds authentication error", async () => {
     const lines: string[] = [];
     for (let i = 0; i < 1000; i++) {
       if (i === 742) {
@@ -1675,7 +1675,7 @@ describe("Scenario 4: API Auth Error (line 743 of 1000)", () => {
 });
 
 describe("Scenario 5: Score-based search finds sections matching later intent words", () => {
-  test("score-based search: multi-word matches rank higher than single-word matches", () => {
+  test("score-based search: multi-word matches rank higher than single-word matches", async () => {
     // Build a 500-line synthetic changelog/advisory output.
     // Three relevant sections are scattered across the document:
     //   Lines 100-120: prototype-related code change (hasOwnProperty, allowPrototypes)
@@ -1815,13 +1815,13 @@ function markHighlighted(content: string, terms: string[]): string {
 }
 
 describe("positionsFromHighlight", () => {
-  test("finds single marker position", () => {
+  test("finds single marker position", async () => {
     const highlighted = `some text ${STX}match${ETX} more text`;
     const positions = positionsFromHighlight(highlighted);
     assert.deepEqual(positions, [10]);
   });
 
-  test("finds multiple marker positions", () => {
+  test("finds multiple marker positions", async () => {
     // "aa \x02bb\x03 cc \x02dd\x03"
     // clean: "aa bb cc dd"  → positions 3 and 9
     const highlighted = `aa ${STX}bb${ETX} cc ${STX}dd${ETX}`;
@@ -1829,12 +1829,12 @@ describe("positionsFromHighlight", () => {
     assert.deepEqual(positions, [3, 9]);
   });
 
-  test("returns empty array when no markers", () => {
+  test("returns empty array when no markers", async () => {
     const positions = positionsFromHighlight("no markers here");
     assert.deepEqual(positions, []);
   });
 
-  test("handles adjacent markers correctly", () => {
+  test("handles adjacent markers correctly", async () => {
     // Two markers right next to each other
     const highlighted = `${STX}first${ETX}${STX}second${ETX}`;
     const positions = positionsFromHighlight(highlighted);
@@ -1843,13 +1843,13 @@ describe("positionsFromHighlight", () => {
 });
 
 describe("extractSnippet with highlight markers", () => {
-  test("returns full content when under maxLen", () => {
+  test("returns full content when under maxLen", async () => {
     const content = "Short content about connections.";
     const result = extractSnippet(content, "connections");
     assert.equal(result, content);
   });
 
-  test("prefers highlight-derived positions over indexOf", () => {
+  test("prefers highlight-derived positions over indexOf", async () => {
     // Place the highlighted term ("configuration") far from the start,
     // and a decoy exact-match term ("configure") near the start.
     const decoy = "configure appears here near the start of the document.";
@@ -1866,7 +1866,7 @@ describe("extractSnippet with highlight markers", () => {
     );
   });
 
-  test("multi-term query produces windows from highlight markers", () => {
+  test("multi-term query produces windows from highlight markers", async () => {
     const part1 = "Database connections are pooled for performance.";
     const gap = " ".repeat(800);
     const part2 = "The configuration file supports YAML formats.";
@@ -1885,7 +1885,7 @@ describe("extractSnippet with highlight markers", () => {
     );
   });
 
-  test("falls back to indexOf when highlighted is absent", () => {
+  test("falls back to indexOf when highlighted is absent", async () => {
     const relevant = "The server connect pool handles all requests efficiently.";
     const content = buildContent("Introduction to the system architecture.", relevant);
     const result = extractSnippet(content, "connect");
@@ -1895,7 +1895,7 @@ describe("extractSnippet with highlight markers", () => {
     );
   });
 
-  test("returns prefix when no matches found at all", () => {
+  test("returns prefix when no matches found at all", async () => {
     const content = buildContent("Nothing relevant here.", "Still nothing relevant.");
     const result = extractSnippet(content, "xylophone");
     assert.ok(
@@ -1904,7 +1904,7 @@ describe("extractSnippet with highlight markers", () => {
     );
   });
 
-  test("short query terms (<=2 chars) are filtered in indexOf fallback", () => {
+  test("short query terms (<=2 chars) are filtered in indexOf fallback", async () => {
     const relevant = "The API endpoint returns a JSON response with status codes.";
     const content = buildContent("Filler content about nothing in particular.", relevant);
     const result = extractSnippet(content, "an endpoint");
@@ -1916,7 +1916,7 @@ describe("extractSnippet with highlight markers", () => {
 });
 
 describe("Store integration: highlighted field", () => {
-  test("search returns highlighted field with STX/ETX markers", () => {
+  test("search returns highlighted field with STX/ETX markers", async () => {
     const store = new ContentStore(":memory:");
     try {
       store.index({
@@ -1942,7 +1942,7 @@ describe("Store integration: highlighted field", () => {
     }
   });
 
-  test("highlighted markers surround stemmed matches", () => {
+  test("highlighted markers surround stemmed matches", async () => {
     const store = new ContentStore(":memory:");
     try {
       store.index({
@@ -1965,7 +1965,7 @@ describe("Store integration: highlighted field", () => {
     }
   });
 
-  test("searchTrigram returns highlighted field", () => {
+  test("searchTrigram returns highlighted field", async () => {
     const store = new ContentStore(":memory:");
     try {
       store.index({
@@ -1987,7 +1987,7 @@ describe("Store integration: highlighted field", () => {
     }
   });
 
-  test("extractSnippet with store-produced highlighted finds stemmed region", () => {
+  test("extractSnippet with store-produced highlighted finds stemmed region", async () => {
     const store = new ContentStore(":memory:");
     try {
       // Content where "configuration" is past the 1500-char prefix
@@ -2018,7 +2018,7 @@ describe("Store integration: highlighted field", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("BM25 field weight tuning", () => {
-  test("title match outranks content-only match", () => {
+  test("title match outranks content-only match", async () => {
     const store = createStore();
     try {
       // Chunk 1: "authentication" in title only
@@ -2032,7 +2032,7 @@ describe("BM25 field weight tuning", () => {
         source: "docs-content-only",
       });
 
-      const results = store.searchWithFallback("authentication", 5);
+      const results = await store.searchWithFallback("authentication", 5);
       assert.ok(results.length >= 2, "Should find both chunks");
       // With 5x title weight, the title-match chunk should rank first
       assert.ok(
@@ -2044,7 +2044,7 @@ describe("BM25 field weight tuning", () => {
     }
   });
 
-  test("title weight boost is consistent for trigram search", () => {
+  test("title weight boost is consistent for trigram search", async () => {
     const store = createStore();
     try {
       store.index({
@@ -2063,7 +2063,7 @@ describe("BM25 field weight tuning", () => {
     }
   });
 
-  test("backward compatibility: existing searches still return results", () => {
+  test("backward compatibility: existing searches still return results", async () => {
     const store = createStore();
     try {
       store.indexPlainText(
@@ -2071,7 +2071,7 @@ describe("BM25 field weight tuning", () => {
         "cache-docs",
       );
 
-      const results = store.searchWithFallback("caching strategy", 3);
+      const results = await store.searchWithFallback("caching strategy", 3);
       assert.ok(results.length > 0, "Existing searches should still work");
     } finally {
       store.close();
@@ -2099,7 +2099,7 @@ describe("Content type filter", () => {
     return store;
   }
 
-  test("search() with contentType='code' returns only code chunks", () => {
+  test("search() with contentType='code' returns only code chunks", async () => {
     const store = createMixedStore();
     try {
       const results = store.search("authenticate", 10, undefined, "AND", "code");
@@ -2112,7 +2112,7 @@ describe("Content type filter", () => {
     }
   });
 
-  test("search() with contentType='prose' returns only prose chunks", () => {
+  test("search() with contentType='prose' returns only prose chunks", async () => {
     const store = createMixedStore();
     try {
       const results = store.search("authentication", 10, undefined, "AND", "prose");
@@ -2125,7 +2125,7 @@ describe("Content type filter", () => {
     }
   });
 
-  test("searchTrigram() respects contentType filter", () => {
+  test("searchTrigram() respects contentType filter", async () => {
     const store = createMixedStore();
     try {
       const results = store.searchTrigram("authenticat", 10, undefined, "AND", "prose");
@@ -2137,10 +2137,10 @@ describe("Content type filter", () => {
     }
   });
 
-  test("searchWithFallback() passes contentType through all layers", () => {
+  test("searchWithFallback() passes contentType through all layers", async () => {
     const store = createMixedStore();
     try {
-      const results = store.searchWithFallback("authenticate", 5, undefined, "code");
+      const results = await store.searchWithFallback("authenticate", 5, undefined, "code");
       assert.ok(results.length > 0, "Should find results");
       for (const r of results) {
         assert.equal(r.contentType, "code", `searchWithFallback should filter by contentType`);
@@ -2150,10 +2150,10 @@ describe("Content type filter", () => {
     }
   });
 
-  test("contentType + source combined filter", () => {
+  test("contentType + source combined filter", async () => {
     const store = createMixedStore();
     try {
-      const results = store.searchWithFallback("authentication", 5, "arch-docs", "prose");
+      const results = await store.searchWithFallback("authentication", 5, "arch-docs", "prose");
       assert.ok(results.length > 0, "Should find results with both filters");
       for (const r of results) {
         assert.equal(r.contentType, "prose");
@@ -2164,10 +2164,10 @@ describe("Content type filter", () => {
     }
   });
 
-  test("contentType undefined returns all types (backward compat)", () => {
+  test("contentType undefined returns all types (backward compat)", async () => {
     const store = createMixedStore();
     try {
-      const results = store.searchWithFallback("authentication", 10);
+      const results = await store.searchWithFallback("authentication", 10);
       assert.ok(results.length > 0, "Should find results without contentType filter");
       // Should include both code and prose chunks (no filter applied)
     } finally {
@@ -2181,14 +2181,14 @@ describe("Content type filter", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("Reciprocal Rank Fusion", () => {
-  test("RRF returns matchLayer='rrf' for fused results", () => {
+  test("RRF returns matchLayer='rrf' for fused results", async () => {
     const store = createStore();
     try {
       store.indexPlainText(
         "The authentication middleware validates JWT tokens on every request.\nExpired tokens are rejected with 401.",
         "auth-docs",
       );
-      const results = store.searchWithFallback("authentication JWT tokens", 3);
+      const results = await store.searchWithFallback("authentication JWT tokens", 3);
       assert.ok(results.length > 0, "RRF should find results");
       assert.equal(results[0].matchLayer, "rrf", "matchLayer should be 'rrf'");
     } finally {
@@ -2196,7 +2196,7 @@ describe("Reciprocal Rank Fusion", () => {
     }
   });
 
-  test("RRF merges porter and trigram results", () => {
+  test("RRF merges porter and trigram results", async () => {
     const store = createStore();
     try {
       // Porter-friendly: standard English words
@@ -2210,14 +2210,14 @@ describe("Reciprocal Rank Fusion", () => {
         "trigram-friendly",
       );
 
-      const results = store.searchWithFallback("authentication middleware", 5);
+      const results = await store.searchWithFallback("authentication middleware", 5);
       assert.ok(results.length >= 2, "Should find results from both tables");
     } finally {
       store.close();
     }
   });
 
-  test("RRF deduplicates by source::title key", () => {
+  test("RRF deduplicates by source::title key", async () => {
     const store = createStore();
     try {
       store.indexPlainText(
@@ -2225,7 +2225,7 @@ describe("Reciprocal Rank Fusion", () => {
         "cache-docs",
       );
 
-      const results = store.searchWithFallback("caching strategy", 10);
+      const results = await store.searchWithFallback("caching strategy", 10);
       // Check no duplicates: same source+title should not appear twice
       const keys = results.map(r => `${r.source}::${r.title}`);
       const uniqueKeys = new Set(keys);
@@ -2235,7 +2235,7 @@ describe("Reciprocal Rank Fusion", () => {
     }
   });
 
-  test("RRF-fuzzy activates on typo", () => {
+  test("RRF-fuzzy activates on typo", async () => {
     const store = createStore();
     try {
       store.indexPlainText(
@@ -2243,7 +2243,7 @@ describe("Reciprocal Rank Fusion", () => {
         "k8s-docs",
       );
 
-      const results = store.searchWithFallback("kuberntes", 3); // typo
+      const results = await store.searchWithFallback("kuberntes", 3); // typo
       assert.ok(results.length > 0, "Fuzzy correction should find results");
       assert.equal(results[0].matchLayer, "rrf-fuzzy", "matchLayer should be 'rrf-fuzzy'");
     } finally {
@@ -2251,13 +2251,13 @@ describe("Reciprocal Rank Fusion", () => {
     }
   });
 
-  test("RRF with source filter respects constraint", () => {
+  test("RRF with source filter respects constraint", async () => {
     const store = createStore();
     try {
       store.indexPlainText("Authentication flow uses JWT tokens.", "auth-source");
       store.indexPlainText("Authentication also uses OAuth.", "oauth-source");
 
-      const results = store.searchWithFallback("authentication", 5, "auth-source");
+      const results = await store.searchWithFallback("authentication", 5, "auth-source");
       assert.ok(results.length > 0);
       for (const r of results) {
         assert.ok(r.source.includes("auth-source"), `Source should match: ${r.source}`);
@@ -2267,7 +2267,7 @@ describe("Reciprocal Rank Fusion", () => {
     }
   });
 
-  test("RRF with contentType filter works", () => {
+  test("RRF with contentType filter works", async () => {
     const store = createStore();
     try {
       store.index({
@@ -2279,7 +2279,7 @@ describe("Reciprocal Rank Fusion", () => {
         source: "prose-docs",
       });
 
-      const results = store.searchWithFallback("authenticate", 5, undefined, "code");
+      const results = await store.searchWithFallback("authenticate", 5, undefined, "code");
       for (const r of results) {
         assert.equal(r.contentType, "code", `Should filter to code only`);
       }
@@ -2288,7 +2288,7 @@ describe("Reciprocal Rank Fusion", () => {
     }
   });
 
-  test("multi-table match ranks higher than single-table", () => {
+  test("multi-table match ranks higher than single-table", async () => {
     const store = createStore();
     try {
       // This content should match well on both porter AND trigram
@@ -2302,14 +2302,14 @@ describe("Reciprocal Rank Fusion", () => {
         "single-table",
       );
 
-      const results = store.searchWithFallback("authentication", 5);
+      const results = await store.searchWithFallback("authentication", 5);
       assert.ok(results.length > 0, "Should find results");
     } finally {
       store.close();
     }
   });
 
-  test("backward compat: existing search patterns still find results", () => {
+  test("backward compat: existing search patterns still find results", async () => {
     const store = createStore();
     try {
       store.indexPlainText(
@@ -2317,7 +2317,7 @@ describe("Reciprocal Rank Fusion", () => {
         "execute:shell",
       );
 
-      const results = store.searchWithFallback("caching strategy", 3, "execute:shell");
+      const results = await store.searchWithFallback("caching strategy", 3, "execute:shell");
       assert.ok(results.length > 0, "Existing patterns should still work");
       assert.ok(results[0].content.includes("caching"), "Content should match");
     } finally {
@@ -2331,7 +2331,7 @@ describe("Reciprocal Rank Fusion", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("Proximity reranking", () => {
-  test("adjacent terms rank higher than distant terms", () => {
+  test("adjacent terms rank higher than distant terms", async () => {
     const store = createStore();
     try {
       // Terms are adjacent: "error handling" close together
@@ -2347,7 +2347,7 @@ describe("Proximity reranking", () => {
         "distant-terms",
       );
 
-      const results = store.searchWithFallback("error handling", 5);
+      const results = await store.searchWithFallback("error handling", 5);
       assert.ok(results.length >= 2, "Should find both chunks");
       // The chunk with adjacent terms should rank first
       assert.ok(
@@ -2359,7 +2359,7 @@ describe("Proximity reranking", () => {
     }
   });
 
-  test("single-term queries are not affected by proximity", () => {
+  test("single-term queries are not affected by proximity", async () => {
     const store = createStore();
     try {
       store.indexPlainText(
@@ -2371,7 +2371,7 @@ describe("Proximity reranking", () => {
         "source-b",
       );
 
-      const results = store.searchWithFallback("authentication", 5);
+      const results = await store.searchWithFallback("authentication", 5);
       assert.ok(results.length > 0, "Should find results");
       // Single term: proximity should not change ordering
       // Just verify results are returned (RRF ordering preserved)
@@ -2380,7 +2380,7 @@ describe("Proximity reranking", () => {
     }
   });
 
-  test("tightest span wins for multi-term query", () => {
+  test("tightest span wins for multi-term query", async () => {
     const store = createStore();
     try {
       // Span of ~5 chars between "cache" and "invalidation"
@@ -2395,7 +2395,7 @@ describe("Proximity reranking", () => {
         "wide-span",
       );
 
-      const results = store.searchWithFallback("cache invalidation", 5);
+      const results = await store.searchWithFallback("cache invalidation", 5);
       assert.ok(results.length >= 2, "Should find both");
       assert.ok(
         results[0].source === "tight-span",
@@ -2406,7 +2406,7 @@ describe("Proximity reranking", () => {
     }
   });
 
-  test("proximity with source filter still works", () => {
+  test("proximity with source filter still works", async () => {
     const store = createStore();
     try {
       store.indexPlainText(
@@ -2418,7 +2418,7 @@ describe("Proximity reranking", () => {
         "other-source",
       );
 
-      const results = store.searchWithFallback("error handling", 5, "filtered-source");
+      const results = await store.searchWithFallback("error handling", 5, "filtered-source");
       assert.ok(results.length > 0);
       for (const r of results) {
         assert.ok(r.source.includes("filtered-source"));
@@ -2428,7 +2428,7 @@ describe("Proximity reranking", () => {
     }
   });
 
-  test("three-term query proximity", () => {
+  test("three-term query proximity", async () => {
     const store = createStore();
     try {
       // All three terms close together
@@ -2444,7 +2444,7 @@ describe("Proximity reranking", () => {
         "spread-out",
       );
 
-      const results = store.searchWithFallback("user authentication token", 5);
+      const results = await store.searchWithFallback("user authentication token", 5);
       assert.ok(results.length >= 2, "Should find both");
       assert.ok(
         results[0].source === "all-close",
@@ -2455,14 +2455,14 @@ describe("Proximity reranking", () => {
     }
   });
 
-  test("proximity does not eliminate results, only reorders", () => {
+  test("proximity does not eliminate results, only reorders", async () => {
     const store = createStore();
     try {
       store.indexPlainText("Error handling is important.", "chunk-a");
       store.indexPlainText("Proper error and exception handling.", "chunk-b");
       store.indexPlainText("Error recovery handling procedures.", "chunk-c");
 
-      const results = store.searchWithFallback("error handling", 10);
+      const results = await store.searchWithFallback("error handling", 10);
       // All chunks should still be present (proximity only reorders, never removes)
       assert.ok(results.length >= 2, "Should not eliminate any results");
     } finally {
@@ -2476,7 +2476,7 @@ describe("Proximity reranking", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("Content-type-aware title boost in reranking", () => {
-  test("chunk with query term in title ranks above chunk with same term only in body", () => {
+  test("chunk with query term in title ranks above chunk with same term only in body", async () => {
     const store = createStore();
     try {
       // Chunk A: title matches "parseConfig"
@@ -2490,7 +2490,7 @@ describe("Content-type-aware title boost in reranking", () => {
         source: "body-match",
       });
 
-      const results = store.searchWithFallback("parseConfig", 5);
+      const results = await store.searchWithFallback("parseConfig", 5);
       assert.ok(results.length >= 2, "Should find both chunks");
       assert.ok(
         results[0].title.toLowerCase().includes("parseconfig"),
@@ -2501,7 +2501,7 @@ describe("Content-type-aware title boost in reranking", () => {
     }
   });
 
-  test("title boost applies to single-term queries (not just multi-term)", () => {
+  test("title boost applies to single-term queries (not just multi-term)", async () => {
     const store = createStore();
     try {
       store.index({
@@ -2513,7 +2513,7 @@ describe("Content-type-aware title boost in reranking", () => {
         source: "auth-body",
       });
 
-      const results = store.searchWithFallback("authentication", 5);
+      const results = await store.searchWithFallback("authentication", 5);
       assert.ok(results.length >= 2, "Should find both chunks");
       assert.ok(
         results[0].title.toLowerCase().includes("authentication"),
@@ -2524,7 +2524,7 @@ describe("Content-type-aware title boost in reranking", () => {
     }
   });
 
-  test("code chunks get stronger title boost than prose chunks", () => {
+  test("code chunks get stronger title boost than prose chunks", async () => {
     const store = createStore();
     try {
       // Code chunk: "validator" in title + code fence → contentType=code, titleWeight=0.6
@@ -2538,7 +2538,7 @@ describe("Content-type-aware title boost in reranking", () => {
         source: "validator-prose",
       });
 
-      const results = store.searchWithFallback("validator input", 5);
+      const results = await store.searchWithFallback("validator input", 5);
       assert.ok(results.length >= 2, "Should find both chunks");
       assert.equal(results[0].contentType, "code", "Code chunk should rank first with stronger title boost");
     } finally {
@@ -2560,7 +2560,7 @@ describe("Content-type-aware title boost in reranking", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("Phrase-frequency reward in reranking", () => {
-  test("multiple phrase occurrences outrank a single tight phrase at similar minSpan", () => {
+  test("multiple phrase occurrences outrank a single tight phrase at similar minSpan", async () => {
     const store = createStore();
     try {
       // Three adjacent occurrences. minSpan ≈ 6 chars (one occurrence).
@@ -2575,7 +2575,7 @@ describe("Phrase-frequency reward in reranking", () => {
         "phrase-once",
       );
 
-      const results = store.searchWithFallback("cache invalidation", 5);
+      const results = await store.searchWithFallback("cache invalidation", 5);
       assert.ok(results.length >= 2, "Should find both chunks");
       assert.equal(
         results[0].source,
@@ -2587,7 +2587,7 @@ describe("Phrase-frequency reward in reranking", () => {
     }
   });
 
-  test("phrase-frequency reward respects query order (regression guard)", () => {
+  test("phrase-frequency reward respects query order (regression guard)", async () => {
     const store = createStore();
     try {
       // Adjacent in query order.
@@ -2601,7 +2601,7 @@ describe("Phrase-frequency reward in reranking", () => {
         "phrase-reversed",
       );
 
-      const results = store.searchWithFallback("cache invalidation", 5);
+      const results = await store.searchWithFallback("cache invalidation", 5);
       assert.ok(results.length >= 2);
       assert.equal(
         results[0].source,
@@ -2613,7 +2613,7 @@ describe("Phrase-frequency reward in reranking", () => {
     }
   });
 
-  test("3-term query: only consecutive-pair adjacency contributes to frequency", () => {
+  test("3-term query: only consecutive-pair adjacency contributes to frequency", async () => {
     const store = createStore();
     try {
       // "alpha beta" adjacent (pair 0→1 hits) AND "beta gamma" adjacent (pair 1→2 hits)
@@ -2630,7 +2630,7 @@ describe("Phrase-frequency reward in reranking", () => {
         "split-adjacency",
       );
 
-      const results = store.searchWithFallback("alpha beta gamma", 5);
+      const results = await store.searchWithFallback("alpha beta gamma", 5);
       assert.ok(results.length >= 2);
       assert.equal(
         results[0].source,
@@ -2642,7 +2642,7 @@ describe("Phrase-frequency reward in reranking", () => {
     }
   });
 
-  test("saturation: 8-hit stuffed doc cannot beat 4-hit doc by more than the cap allows", () => {
+  test("saturation: 8-hit stuffed doc cannot beat 4-hit doc by more than the cap allows", async () => {
     const store = createStore();
     try {
       // 8 adjacent occurrences — well above saturation (4).
@@ -2670,7 +2670,7 @@ describe("Phrase-frequency reward in reranking", () => {
         "natural-prose",
       );
 
-      const results = store.searchWithFallback("cache invalidation", 5);
+      const results = await store.searchWithFallback("cache invalidation", 5);
       assert.ok(results.length >= 3, "Should find all three chunks");
 
       const top3 = results.slice(0, 3).map((r) => r.source);
@@ -2759,14 +2759,14 @@ describe("Search relevance eval — competitive corpus", () => {
     relevanceStore.cleanup();
   });
 
-  function topOne(query: string, expectedSource: string) {
-    const results = relevanceStore.searchWithFallback(query, 3);
+  async function topOne(query: string, expectedSource: string) {
+    const results = await relevanceStore.searchWithFallback(query, 3);
     expect(results.length, `"${query}" should return results`).toBeGreaterThan(0);
     expect(results[0].source, `"${query}" #1 should be "${expectedSource}", got "${results[0]?.source}"`).toBe(expectedSource);
   }
 
-  function ranking(query: string, expectTop: string | string[], expectAbsent?: string[], layer?: string) {
-    const results = relevanceStore.searchWithFallback(query, 5);
+  async function ranking(query: string, expectTop: string | string[], expectAbsent?: string[], layer?: string) {
+    const results = await relevanceStore.searchWithFallback(query, 5);
     const sources = results.map((r) => r.source);
     const tops = Array.isArray(expectTop) ? expectTop : [expectTop];
     for (const e of tops) expect(sources, `"${query}" should find "${e}" in top 5, got [${sources}]`).toContain(e);
@@ -2775,32 +2775,32 @@ describe("Search relevance eval — competitive corpus", () => {
   }
 
   // precision@1
-  test("'authentication middleware JWT' → api-auth-handler", () => topOne("authentication middleware JWT", "api-auth-handler"));
-  test("'database connection timeout' → python-traceback", () => topOne("database connection timeout", "python-traceback"));
-  test("'useEffect cleanup' → react-useeffect-docs", () => topOne("useEffect cleanup", "react-useeffect-docs"));
-  test("'tenant_id migration ALTER TABLE' → database-migration", () => topOne("tenant_id migration ALTER TABLE", "database-migration"));
-  test("'Dockerfile multi-stage build' → dockerfile-prod", () => topOne("Dockerfile multi-stage build", "dockerfile-prod"));
-  test("'Kubernetes deployment replicas' → k8s-deployment", () => topOne("Kubernetes deployment replicas", "k8s-deployment"));
-  test("'tailwind theme colors brand' → tailwind-config", () => topOne("tailwind theme colors brand", "tailwind-config"));
-  test("'test failed assertion FAIL' → vitest-output", () => topOne("test failed assertion FAIL", "vitest-output"));
+  test("'authentication middleware JWT' → api-auth-handler", async () => topOne("authentication middleware JWT", "api-auth-handler"));
+  test("'database connection timeout' → python-traceback", async () => topOne("database connection timeout", "python-traceback"));
+  test("'useEffect cleanup' → react-useeffect-docs", async () => topOne("useEffect cleanup", "react-useeffect-docs"));
+  test("'tenant_id migration ALTER TABLE' → database-migration", async () => topOne("tenant_id migration ALTER TABLE", "database-migration"));
+  test("'Dockerfile multi-stage build' → dockerfile-prod", async () => topOne("Dockerfile multi-stage build", "dockerfile-prod"));
+  test("'Kubernetes deployment replicas' → k8s-deployment", async () => topOne("Kubernetes deployment replicas", "k8s-deployment"));
+  test("'tailwind theme colors brand' → tailwind-config", async () => topOne("tailwind theme colors brand", "tailwind-config"));
+  test("'test failed assertion FAIL' → vitest-output", async () => topOne("test failed assertion FAIL", "vitest-output"));
 
   // recall@5
-  test("'error timeout' finds python-traceback", () => ranking("error timeout", "python-traceback", ["tailwind-config", "git-log-recent"]));
-  test("'build warning experimental serverActions' finds nextjs output", () => ranking("build warning experimental serverActions", "nextjs-build-output"));
-  test("'react dependencies vitest typescript' finds package.json", () => ranking("react dependencies vitest typescript", "package-json-deps"));
-  test("'mmap pragma perf FTS5' finds git log", () => ranking("mmap pragma perf FTS5", "git-log-recent"));
+  test("'error timeout' finds python-traceback", async () => ranking("error timeout", "python-traceback", ["tailwind-config", "git-log-recent"]));
+  test("'build warning experimental serverActions' finds nextjs output", async () => ranking("build warning experimental serverActions", "nextjs-build-output"));
+  test("'react dependencies vitest typescript' finds package.json", async () => ranking("react dependencies vitest typescript", "package-json-deps"));
+  test("'mmap pragma perf FTS5' finds git log", async () => ranking("mmap pragma perf FTS5", "git-log-recent"));
 
   // title boost
-  test("'Kubernetes deployment' title match ranks k8s-deployment first", () => topOne("Kubernetes deployment", "k8s-deployment"));
-  test("'Dockerfile' title match ranks dockerfile-prod first", () => topOne("Dockerfile", "dockerfile-prod"));
+  test("'Kubernetes deployment' title match ranks k8s-deployment first", async () => topOne("Kubernetes deployment", "k8s-deployment"));
+  test("'Dockerfile' title match ranks dockerfile-prod first", async () => topOne("Dockerfile", "dockerfile-prod"));
 
   // cascade
-  test("exact terms hit RRF layer", () => ranking("useEffect cleanup", "react-useeffect-docs", undefined, "rrf"));
-  test("typo still resolves to correct doc", () => ranking("authenticaton middlewar", "api-auth-handler"));
+  test("exact terms hit RRF layer", async () => ranking("useEffect cleanup", "react-useeffect-docs", undefined, "rrf"));
+  test("typo still resolves to correct doc", async () => ranking("authenticaton middlewar", "api-auth-handler"));
 
   // negatives
-  test("'tailwind colors' excludes unrelated sources", () => ranking("tailwind colors", "tailwind-config", ["database-migration", "python-traceback"]));
-  test("'SQL ALTER TABLE' excludes non-DB sources", () => ranking("SQL ALTER TABLE", "database-migration", ["nginx-access-log", "react-useeffect-docs"]));
+  test("'tailwind colors' excludes unrelated sources", async () => ranking("tailwind colors", "tailwind-config", ["database-migration", "python-traceback"]));
+  test("'SQL ALTER TABLE' excludes non-DB sources", async () => ranking("SQL ALTER TABLE", "database-migration", ["nginx-access-log", "react-useeffect-docs"]));
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -2843,7 +2843,7 @@ afterEach(() => {
 });
 
 describe("sort=relevance returns ContentStore only", () => {
-  test("relevance mode only queries ContentStore, ignores SessionDB and auto-memory", () => {
+  test("relevance mode only queries ContentStore, ignores SessionDB and auto-memory", async () => {
     const store = createUnifiedStore();
     store.indexPlainText(
       "Authentication middleware validates JWT tokens on every request.",
@@ -2860,7 +2860,7 @@ describe("sort=relevance returns ContentStore only", () => {
       priority: 2,
     }, "PostToolUse");
 
-    const results = searchAllSources({
+    const results = await searchAllSources({
       query: "JWT",
       limit: 5,
       store,
@@ -2877,7 +2877,7 @@ describe("sort=relevance returns ContentStore only", () => {
 });
 
 describe("sort=timeline merges 3 sources chronologically", () => {
-  test("timeline mode merges ContentStore, SessionDB, and auto-memory results", () => {
+  test("timeline mode merges ContentStore, SessionDB, and auto-memory results", async () => {
     const store = createUnifiedStore();
     store.indexPlainText(
       "Deploy pipeline configuration for production environment.",
@@ -2903,7 +2903,7 @@ describe("sort=timeline merges 3 sources chronologically", () => {
       "# Deploy Rules\nAlways deploy to staging first.\n",
     );
 
-    const results = searchAllSources({
+    const results = await searchAllSources({
       query: "deploy",
       limit: 10,
       store,
@@ -2920,7 +2920,7 @@ describe("sort=timeline merges 3 sources chronologically", () => {
     expect(origins.size).toBeGreaterThanOrEqual(2);
   });
 
-  test("timeline results are sorted chronologically", () => {
+  test("timeline results are sorted chronologically", async () => {
     const store = createUnifiedStore();
     store.indexPlainText("Server config alpha", "execute:shell");
 
@@ -2934,7 +2934,7 @@ describe("sort=timeline merges 3 sources chronologically", () => {
       priority: 2,
     }, "PostToolUse");
 
-    const results = searchAllSources({
+    const results = await searchAllSources({
       query: "server config",
       limit: 10,
       store,
@@ -2957,7 +2957,7 @@ describe("sort=timeline merges 3 sources chronologically", () => {
 });
 
 describe("error in one source doesn't break others", () => {
-  test("invalid sessionDB still returns ContentStore results", () => {
+  test("invalid sessionDB still returns ContentStore results", async () => {
     const store = createUnifiedStore();
     store.indexPlainText(
       "Error handling test content with database queries.",
@@ -2965,7 +2965,7 @@ describe("error in one source doesn't break others", () => {
     );
 
     // Pass null sessionDB to simulate unavailable session DB
-    const results = searchAllSources({
+    const results = await searchAllSources({
       query: "database",
       limit: 5,
       store,
@@ -2979,14 +2979,14 @@ describe("error in one source doesn't break others", () => {
     expect(results.every(r => r.origin === "current-session")).toBe(true);
   });
 
-  test("nonexistent configDir still returns other source results", () => {
+  test("nonexistent configDir still returns other source results", async () => {
     const store = createUnifiedStore();
     store.indexPlainText(
       "Memory resilience test with important data.",
       "execute:shell",
     );
 
-    const results = searchAllSources({
+    const results = await searchAllSources({
       query: "resilience",
       limit: 5,
       store,
@@ -3001,7 +3001,7 @@ describe("error in one source doesn't break others", () => {
 });
 
 describe("empty index guard skipped in timeline mode", () => {
-  test("timeline mode proceeds even when ContentStore has zero chunks", () => {
+  test("timeline mode proceeds even when ContentStore has zero chunks", async () => {
     const store = createUnifiedStore(); // empty, no indexed content
 
     const sessionDB = createTestDB();
@@ -3015,7 +3015,7 @@ describe("empty index guard skipped in timeline mode", () => {
     }, "PostToolUse", { projectDir: "/project", source: "env", confidence: 1 });
 
     // In timeline mode, empty ContentStore should NOT be an error
-    const results = searchAllSources({
+    const results = await searchAllSources({
       query: "timeline check",
       limit: 5,
       store,
@@ -3030,10 +3030,10 @@ describe("empty index guard skipped in timeline mode", () => {
     expect(priorResults.length).toBeGreaterThan(0);
   });
 
-  test("relevance mode with empty store returns no results", () => {
+  test("relevance mode with empty store returns no results", async () => {
     const store = createUnifiedStore(); // empty
 
-    const results = searchAllSources({
+    const results = await searchAllSources({
       query: "anything",
       limit: 5,
       store,
@@ -3048,7 +3048,7 @@ describe("empty index guard skipped in timeline mode", () => {
 });
 
 describe("default sort is relevance (backward compatible)", () => {
-  test("omitting sort defaults to relevance behavior", () => {
+  test("omitting sort defaults to relevance behavior", async () => {
     const store = createUnifiedStore();
     store.indexPlainText(
       "Backward compatibility test for default search mode.",
@@ -3066,7 +3066,7 @@ describe("default sort is relevance (backward compatible)", () => {
     }, "PostToolUse");
 
     // No sort param — should default to "relevance"
-    const results = searchAllSources({
+    const results = await searchAllSources({
       query: "backward compatibility",
       limit: 5,
       store,
@@ -3134,7 +3134,7 @@ describe("searchAutoMemory", () => {
     writeFileSync(join(qwenMemDir, "note.md"), "Qwen analytics note content.");
   })();
 
-  test("returns empty for non-existent project and config directories", () => {
+  test("returns empty for non-existent project and config directories", async () => {
     const results = searchAutoMemory(
       ["anything"],
       10,
@@ -3144,7 +3144,7 @@ describe("searchAutoMemory", () => {
     expect(results).toEqual([]);
   });
 
-  test("finds matching content in memory files", () => {
+  test("finds matching content in memory files", async () => {
     const results = searchAutoMemory(
       ["analytics"],
       10,
@@ -3159,7 +3159,7 @@ describe("searchAutoMemory", () => {
     }
   });
 
-  test("case-insensitive search", () => {
+  test("case-insensitive search", async () => {
     const lower = searchAutoMemory(["analytics"], 10, PROJECT_DIR, CLAUDE_CONFIG);
     const upper = searchAutoMemory(["ANALYTICS"], 10, PROJECT_DIR, CLAUDE_CONFIG);
     const mixed = searchAutoMemory(["AnAlYtIcS"], 10, PROJECT_DIR, CLAUDE_CONFIG);
@@ -3169,7 +3169,7 @@ describe("searchAutoMemory", () => {
     expect(mixed.length).toBe(lower.length);
   });
 
-  test("respects limit parameter", () => {
+  test("respects limit parameter", async () => {
     const bulkConfig = join(AUTO_MEM_ROOT, ".bulk-test");
     const bulkMemDir = join(bulkConfig, "memory");
     mkdirSync(bulkMemDir, { recursive: true });
@@ -3191,7 +3191,7 @@ describe("searchAutoMemory", () => {
     expect(results.length).toBeLessThanOrEqual(3);
   });
 
-  test("one match per file even with multiple query hits", () => {
+  test("one match per file even with multiple query hits", async () => {
     const results = searchAutoMemory(
       ["analytics", "project"],
       10,
@@ -3204,7 +3204,7 @@ describe("searchAutoMemory", () => {
     expect(uniqueSources.size).toBe(sources.length);
   });
 
-  test("multiple queries match different files", () => {
+  test("multiple queries match different files", async () => {
     const results = searchAutoMemory(
       ["analytics", "npm"],
       10,
@@ -3218,12 +3218,12 @@ describe("searchAutoMemory", () => {
     expect(uniqueSources.size).toBeGreaterThanOrEqual(2);
   });
 
-  test("returns empty array for empty queries", () => {
+  test("returns empty array for empty queries", async () => {
     const results = searchAutoMemory([], 10, PROJECT_DIR, CLAUDE_CONFIG);
     expect(results).toEqual([]);
   });
 
-  test("adapter-aware: different configDir yields different results", () => {
+  test("adapter-aware: different configDir yields different results", async () => {
     const claudeResults = searchAutoMemory(["analytics"], 10, undefined, CLAUDE_CONFIG);
     const qwenResults = searchAutoMemory(["analytics"], 10, undefined, QWEN_CONFIG);
 
@@ -3235,7 +3235,7 @@ describe("searchAutoMemory", () => {
     expect(claudeSources).not.toEqual(qwenSources);
   });
 
-  test("result shape matches AutoMemoryResult interface", () => {
+  test("result shape matches AutoMemoryResult interface", async () => {
     const results = searchAutoMemory(["Alice"], 10, undefined, CLAUDE_CONFIG);
     expect(results.length).toBeGreaterThanOrEqual(1);
 
@@ -3248,7 +3248,7 @@ describe("searchAutoMemory", () => {
     expect(r.title).toContain("[auto-memory]");
   });
 
-  test("finds content in CLAUDE.md files (unified)", () => {
+  test("finds content in CLAUDE.md files (unified)", async () => {
     const configDir = createTempDir();
     writeFileSync(
       join(configDir, "CLAUDE.md"),
@@ -3261,7 +3261,7 @@ describe("searchAutoMemory", () => {
     expect(results[0].content).toContain("TypeScript strict");
   });
 
-  test("finds content in memory directory (unified)", () => {
+  test("finds content in memory directory (unified)", async () => {
     const configDir = createTempDir();
     const memoryDir = join(configDir, "memory");
     mkdirSync(memoryDir, { recursive: true });
@@ -3275,7 +3275,7 @@ describe("searchAutoMemory", () => {
     expect(results[0].content).toContain("vim keybindings");
   });
 
-  test("returns empty for nonexistent dirs (unified)", () => {
+  test("returns empty for nonexistent dirs (unified)", async () => {
     const results = searchAutoMemory(
       ["anything"],
       5,
@@ -3291,7 +3291,7 @@ describe("searchAutoMemory", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("SessionDB.searchEvents (unified)", () => {
-  test("finds events matching query text", () => {
+  test("finds events matching query text", async () => {
     const db = createTestDB();
     const sessionId = `test-${randomUUID()}`;
     db.ensureSession(sessionId, "/project");
@@ -3315,7 +3315,7 @@ describe("SessionDB.searchEvents (unified)", () => {
     expect(results[0].data).toContain("authentication");
   });
 
-  test("scopes search by projectDir", () => {
+  test("scopes search by projectDir", async () => {
     const db = createTestDB();
     const sessionId = `test-${randomUUID()}`;
     db.ensureSession(sessionId, "/project-a");
@@ -3339,7 +3339,7 @@ describe("SessionDB.searchEvents (unified)", () => {
     expect(results[0].data).toBe("deploy script content");
   });
 
-  test("returns empty for no matches", () => {
+  test("returns empty for no matches", async () => {
     const db = createTestDB();
     const sessionId = `test-${randomUUID()}`;
     db.ensureSession(sessionId, "/project");

@@ -8,7 +8,8 @@
  *   4. No match → null (broken link)
  */
 
-import { normalize, sep } from "node:path";
+import { sep } from "node:path";
+import { normalizePath } from "./path-utils.js";
 
 // ─────────────────────────────────────────────────────────
 // Resolution
@@ -83,11 +84,6 @@ export function resolveLink(
 // ─────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────
-
-/** Normalise path separators to forward-slash. */
-function normalizePath(p: string): string {
-  return normalize(p).replace(/\\/g, "/");
-}
 
 /** Compare paths with case-insensitivity on Windows. */
 function pathEquals(a: string, b: string, isWin: boolean): boolean {

@@ -38,6 +38,7 @@ interface BFSNode {
 
 export class VaultGraphSearch {
   #store: VaultGraphStore;
+  #cachedPageRank: Map<number, number> | null = null;
 
   constructor(store: VaultGraphStore) {
     this.#store = store;
@@ -49,9 +50,11 @@ export class VaultGraphSearch {
    * Compute iterative PageRank over all vault nodes.
    * 20 iterations with damping factor 0.85.
    * Returns Map<nodeId, pageRankValue>.
-   * Computed on-the-fly (no schema migration needed).
+   * Cached: invalidated on re-index via invalidateCache().
    */
   pageRank(): Map<number, number> {
+    if (this.#cachedPageRank) return this.#cachedPageRank;
+
     const edges = this.#store.getAllEdges();
     const damping = 0.85;
     const iterations = 20;
@@ -67,20 +70,24 @@ export class VaultGraphSearch {
     for (const n of allNodes) nodeIds.add(n.id);
 
     const N = nodeIds.size;
-    if (N === 0) return new Map();
+    if (N === 0) {
+      this.#cachedPageRank = new Map();
+      return this.#cachedPageRank;
+    }
 
-    // Build out-degree and adjacency (source -> targets)
+    // Build out-degree (source -> count of outgoing edges)
     const outDegree = new Map<number, number>();
-    const adjacency = new Map<number, number[]>();
+    // Build reverse adjacency (target -> sources that link to it) — O(E) once
+    const reverseAdj = new Map<number, number[]>();
 
     for (const edge of edges) {
       if (edge.target_id === null) continue;
       outDegree.set(edge.source_id, (outDegree.get(edge.source_id) ?? 0) + 1);
-      const list = adjacency.get(edge.source_id);
+      const list = reverseAdj.get(edge.target_id);
       if (list) {
-        list.push(edge.target_id);
+        list.push(edge.source_id);
       } else {
-        adjacency.set(edge.source_id, [edge.target_id]);
+        reverseAdj.set(edge.target_id, [edge.source_id]);
       }
     }
 
@@ -90,7 +97,7 @@ export class VaultGraphSearch {
       rank.set(id, 1 / N);
     }
 
-    // Iterative PageRank
+    // Iterative PageRank — each iteration O(V+E) via reverse adjacency
     for (let iter = 0; iter < iterations; iter++) {
       const newRank = new Map<number, number>();
       // Dangling node contribution (nodes with out-degree 0)
@@ -103,10 +110,10 @@ export class VaultGraphSearch {
 
       for (const id of nodeIds) {
         let sum = danglingSum / N;
-        // In-links: find all nodes that link TO this node
-        // We iterate adjacency to find incoming edges
-        for (const [srcId, targets] of adjacency) {
-          if (targets.includes(id)) {
+        // In-links: look up reverse adjacency directly — O(in_degree) per node
+        const sources = reverseAdj.get(id);
+        if (sources) {
+          for (const srcId of sources) {
             const srcOutDeg = outDegree.get(srcId) ?? 1;
             sum += (rank.get(srcId) ?? 0) / srcOutDeg;
           }
@@ -120,7 +127,16 @@ export class VaultGraphSearch {
       }
     }
 
+    this.#cachedPageRank = rank;
     return rank;
+  }
+
+  /**
+   * Invalidate cached PageRank result.
+   * Call after re-indexing changes the graph structure.
+   */
+  invalidateCache(): void {
+    this.#cachedPageRank = null;
   }
 
   // ── BFS Traversal ──
@@ -434,7 +450,7 @@ export class VaultGraphSearch {
    */
   #findNodeByTextResult(result: SearchResult): { id: number; in_degree: number } | null {
     // Try matching by source label to note_path
-    const byPath = this.#store.getNodeByPath(result.source);
+    const byPath = this.#store.getNodeByNotePath(result.source);
     if (byPath) return { id: byPath.id, in_degree: byPath.in_degree };
 
     // Try matching by title

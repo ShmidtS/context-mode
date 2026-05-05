@@ -342,8 +342,7 @@ export function withRetry<T>(fn: () => T, delays: number[] = [100, 500, 2000]): 
       lastError = err instanceof Error ? err : new Error(msg);
       if (attempt < delays.length) {
         const delay = delays[attempt];
-        const start = Date.now();
-        while (Date.now() - start < delay) { /* busy-wait for sync retry */ }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
       }
     }
   }

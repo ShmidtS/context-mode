@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -58,6 +58,18 @@ function convertGlobPart(glob: string): string {
     .replace(/\*/g, ".*");
 }
 
+// Cache compiled glob regexes by pattern string + flags (LRU, max 256)
+const CACHE_MAX = 256;
+const globRegexCache = new Map<string, RegExp>();
+
+/** Evict oldest entry when cache exceeds max size. */
+function evictIfNeeded(cache: Map<string, unknown>): void {
+  if (cache.size >= CACHE_MAX) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+}
+
 /**
  * Convert a Bash permission glob to a regex.
  *
@@ -69,6 +81,10 @@ export function globToRegex(
   glob: string,
   caseInsensitive: boolean = false,
 ): RegExp {
+  const cacheKey = `${glob}:${caseInsensitive ? "i" : ""}`;
+  const cached = globRegexCache.get(cacheKey);
+  if (cached) return cached;
+
   let regexStr: string;
 
   const colonIdx = glob.indexOf(":");
@@ -85,8 +101,14 @@ export function globToRegex(
     regexStr = `^${convertGlobPart(glob)}$`;
   }
 
-  return new RegExp(regexStr, caseInsensitive ? "i" : "");
+  const regex = new RegExp(regexStr, caseInsensitive ? "i" : "");
+  evictIfNeeded(globRegexCache);
+  globRegexCache.set(cacheKey, regex);
+  return regex;
 }
+
+// Cache compiled file glob regexes by pattern string + flags (LRU, max 256)
+const fileGlobRegexCache = new Map<string, RegExp>();
 
 /**
  * Convert a file path glob to a regex.
@@ -101,6 +123,10 @@ export function fileGlobToRegex(
   glob: string,
   caseInsensitive: boolean = false,
 ): RegExp {
+  const cacheKey = `${glob}:${caseInsensitive ? "i" : ""}`;
+  const cached = fileGlobRegexCache.get(cacheKey);
+  if (cached) return cached;
+
   let regexStr = "";
   let i = 0;
 
@@ -130,7 +156,10 @@ export function fileGlobToRegex(
     }
   }
 
-  return new RegExp(`^${regexStr}$`, caseInsensitive ? "i" : "");
+  const regex = new RegExp(`^${regexStr}$`, caseInsensitive ? "i" : "");
+  evictIfNeeded(fileGlobRegexCache);
+  fileGlobRegexCache.set(cacheKey, regex);
+  return regex;
 }
 
 /**
@@ -213,21 +242,31 @@ export function splitChainedCommands(command: string): string[] {
 // Settings Reader
 // ==============================================================================
 
+// Cache parsed JSON from settings files, invalidated by mtime change
+const settingsFileCache = new Map<string, { mtimeMs: number; parsed: any }>();
+
+/** Read and parse a JSON file, caching by mtime. Returns null if missing/invalid. */
+function readCachedJson(path: string): any | null {
+  try {
+    const stat = statSync(path);
+    const cached = settingsFileCache.get(path);
+    if (cached && cached.mtimeMs === stat.mtimeMs) {
+      return cached.parsed;
+    }
+    const raw = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(raw);
+    settingsFileCache.set(path, { mtimeMs: stat.mtimeMs, parsed });
+    return parsed;
+  } catch {
+    settingsFileCache.delete(path);
+    return null;
+  }
+}
+
 /** Read one settings file and return a SecurityPolicy with only Bash patterns. */
 function readSingleSettings(path: string): SecurityPolicy | null {
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf-8");
-  } catch {
-    return null;
-  }
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  const parsed = readCachedJson(path);
+  if (parsed === null) return null;
 
   const perms = parsed?.permissions;
   if (!perms || typeof perms !== "object") return null;
@@ -298,19 +337,8 @@ export function readToolDenyPatterns(
   const result: string[][] = [];
 
   const extractGlobs = (path: string): string[] | null => {
-    let raw: string;
-    try {
-      raw = readFileSync(path, "utf-8");
-    } catch {
-      return null;
-    }
-
-    let parsed: any;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return null;
-    }
+    const parsed = readCachedJson(path);
+    if (parsed === null) return null;
 
     const deny = parsed?.permissions?.deny;
     if (!Array.isArray(deny)) return [];

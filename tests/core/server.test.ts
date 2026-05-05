@@ -37,7 +37,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 describe("Non-zero Exit Code Classification", () => {
   // ── Soft-fail: shell + exit 1 + stdout present ──
 
-  test("shell exit 1 with stdout → not an error (grep no-match pattern)", () => {
+  test("shell exit 1 with stdout → not an error (grep no-match pattern)", async () => {
     const result = classifyNonZeroExit({
       language: "shell",
       exitCode: 1,
@@ -48,7 +48,7 @@ describe("Non-zero Exit Code Classification", () => {
     expect(result.output).toBe("file1.ts:10: writeRouting\nfile2.ts:20: writeRouting");
   });
 
-  test("shell exit 1 with empty stdout → real error", () => {
+  test("shell exit 1 with empty stdout → real error", async () => {
     const result = classifyNonZeroExit({
       language: "shell",
       exitCode: 1,
@@ -58,7 +58,7 @@ describe("Non-zero Exit Code Classification", () => {
     expect(result.isError).toBe(true);
   });
 
-  test("shell exit 1 with whitespace-only stdout → real error", () => {
+  test("shell exit 1 with whitespace-only stdout → real error", async () => {
     const result = classifyNonZeroExit({
       language: "shell",
       exitCode: 1,
@@ -70,7 +70,7 @@ describe("Non-zero Exit Code Classification", () => {
 
   // ── Hard errors: exit code >= 2 ──
 
-  test("shell exit 2 (grep bad regex) → always error", () => {
+  test("shell exit 2 (grep bad regex) → always error", async () => {
     const result = classifyNonZeroExit({
       language: "shell",
       exitCode: 2,
@@ -82,7 +82,7 @@ describe("Non-zero Exit Code Classification", () => {
     expect(result.output).toContain("grep: Invalid regular expression");
   });
 
-  test("shell exit 127 (command not found) → always error", () => {
+  test("shell exit 127 (command not found) → always error", async () => {
     const result = classifyNonZeroExit({
       language: "shell",
       exitCode: 127,
@@ -95,7 +95,7 @@ describe("Non-zero Exit Code Classification", () => {
 
   // ── Non-shell languages: always error ──
 
-  test("javascript exit 1 with stdout → still an error (not shell)", () => {
+  test("javascript exit 1 with stdout → still an error (not shell)", async () => {
     const result = classifyNonZeroExit({
       language: "javascript",
       exitCode: 1,
@@ -106,7 +106,7 @@ describe("Non-zero Exit Code Classification", () => {
     expect(result.output).toContain("Exit code: 1");
   });
 
-  test("python exit 1 with stdout → still an error (not shell)", () => {
+  test("python exit 1 with stdout → still an error (not shell)", async () => {
     const result = classifyNonZeroExit({
       language: "python",
       exitCode: 1,
@@ -116,7 +116,7 @@ describe("Non-zero Exit Code Classification", () => {
     expect(result.isError).toBe(true);
   });
 
-  test("typescript exit 1 with stdout → still an error (not shell)", () => {
+  test("typescript exit 1 with stdout → still an error (not shell)", async () => {
     const result = classifyNonZeroExit({
       language: "typescript",
       exitCode: 1,
@@ -128,7 +128,7 @@ describe("Non-zero Exit Code Classification", () => {
 
   // ── Output format ──
 
-  test("soft-fail output is clean stdout (no 'Exit code:' prefix)", () => {
+  test("soft-fail output is clean stdout (no 'Exit code:' prefix)", async () => {
     const result = classifyNonZeroExit({
       language: "shell",
       exitCode: 1,
@@ -151,7 +151,7 @@ describe("Non-zero Exit Code Classification", () => {
     expect(result.output).toContain("error msg");
   });
 
-  test("hard-fail with empty stdout still forwards stderr in output", () => {
+  test("hard-fail with empty stdout still forwards stderr in output", async () => {
     const result = classifyNonZeroExit({
       language: "shell",
       exitCode: 1,
@@ -163,7 +163,7 @@ describe("Non-zero Exit Code Classification", () => {
     expect(result.output).toContain("command not found");
   });
 
-  test("hard-fail output has labeled 'stdout:' and 'stderr:' sections", () => {
+  test("hard-fail output has labeled 'stdout:' and 'stderr:' sections", async () => {
     const result = classifyNonZeroExit({
       language: "node",
       exitCode: 137,
@@ -354,7 +354,7 @@ describe("Large Output Auto-Indexing", () => {
     const indexed = store.indexPlainText(largeOutput, "test:large-output");
     assert.ok(indexed.totalChunks > 1, "Should be chunked into multiple sections");
 
-    const results = store.searchWithFallback("data_value_2500", 3, "test:large-output");
+    const results = await store.searchWithFallback("data_value_2500", 3, "test:large-output");
     assert.ok(results.length > 0, "Middle content should be searchable");
     assert.ok(results[0].content.includes("2500"), "Should find the middle line");
 
@@ -1166,7 +1166,7 @@ describe("ctx_index: projectRoot path resolution (#365)", () => {
   // resolvedPath, not to the raw user-typed `path`. Validates the actual
   // src/server.ts decision so a regression to `source ?? path` fails CI even
   // before bundle rebuild and end-to-end spawn coverage.
-  test("source-label canonicalization: src/server.ts uses `source ?? resolvedPath`", () => {
+  test("source-label canonicalization: src/server.ts uses `source ?? resolvedPath`", async () => {
     const serverSrc = readFileSync(
       resolve(__dirname, "../../src/server.ts"),
       "utf-8",
@@ -1353,7 +1353,7 @@ function runHook(input: Record<string, unknown>): string {
 }
 
 describe("Hook Injection", () => {
-  test("Task hook injects context_window_protection XML block", () => {
+  test("Task hook injects context_window_protection XML block", async () => {
     const output = runHook({
       tool_name: "Task",
       tool_input: { prompt: "Research zod npm package", subagent_type: "general-purpose" },
@@ -1370,7 +1370,7 @@ describe("Hook Injection", () => {
     );
   });
 
-  test("Task hook injects output constraints and tool hierarchy", () => {
+  test("Task hook injects output constraints and tool hierarchy", async () => {
     const output = runHook({
       tool_name: "Task",
       tool_input: { prompt: "Research zod", subagent_type: "general-purpose" },
@@ -1389,7 +1389,7 @@ describe("Hook Injection", () => {
     );
   });
 
-  test("Task hook injects batch_execute as primary tool", () => {
+  test("Task hook injects batch_execute as primary tool", async () => {
     const output = runHook({
       tool_name: "Task",
       tool_input: { prompt: "Analyze repo", subagent_type: "Explore" },
@@ -1402,7 +1402,7 @@ describe("Hook Injection", () => {
     );
   });
 
-  test("Task hook upgrades Bash subagent to general-purpose", () => {
+  test("Task hook upgrades Bash subagent to general-purpose", async () => {
     const output = runHook({
       tool_name: "Task",
       tool_input: { prompt: "Run git log", subagent_type: "Bash" },
@@ -1420,7 +1420,7 @@ describe("Hook Injection", () => {
     );
   });
 
-  test("Task hook preserves original prompt content", () => {
+  test("Task hook preserves original prompt content", async () => {
     const original = "Research the architecture of Next.js App Router";
     const output = runHook({
       tool_name: "Task",
@@ -1434,7 +1434,7 @@ describe("Hook Injection", () => {
     );
   });
 
-  test("Non-Task tools are not affected by output budget", () => {
+  test("Non-Task tools are not affected by output budget", async () => {
     const output = runHook({
       tool_name: "Bash",
       tool_input: { command: "ls -la" },
@@ -1448,7 +1448,7 @@ describe("Hook Injection", () => {
 });
 
 describe("Shared Knowledge Base (subagent -> main)", () => {
-  test("subagent index() is visible to main agent search()", () => {
+  test("subagent index() is visible to main agent search()", async () => {
     // Same ContentStore instance = same as shared MCP server process
     const store = new ContentStore(":memory:");
 
@@ -1485,7 +1485,7 @@ describe("Shared Knowledge Base (subagent -> main)", () => {
     store.close();
   });
 
-  test("multiple subagents index into same KB with distinct sources", () => {
+  test("multiple subagents index into same KB with distinct sources", async () => {
     const store = new ContentStore(":memory:");
 
     // Subagent A indexes architecture research
@@ -1523,7 +1523,7 @@ describe("Shared Knowledge Base (subagent -> main)", () => {
     store.close();
   });
 
-  test("main agent can search subagent KB after subagent is done", () => {
+  test("main agent can search subagent KB after subagent is done", async () => {
     const store = new ContentStore(":memory:");
 
     // Subagent lifecycle: index → close (subagent done)
@@ -1543,7 +1543,7 @@ describe("Shared Knowledge Base (subagent -> main)", () => {
 });
 
 describe("Context Budget Measurement", () => {
-  test("ideal subagent response is under 500 words / 2KB", () => {
+  test("ideal subagent response is under 500 words / 2KB", async () => {
     // This is what a compliant subagent response should look like
     const idealResponse = [
       "## Summary",
@@ -1569,7 +1569,7 @@ describe("Context Budget Measurement", () => {
     assert.ok(bytes < 2048, `Ideal response should be under 2KB, got ${bytes}`);
   });
 
-  test("non-compliant response exceeds budget", () => {
+  test("non-compliant response exceeds budget", async () => {
     // Simulate what happens WITHOUT the output budget — full inline dump
     const bloatedResponse = Array.from(
       { length: 50 },
@@ -1633,31 +1633,31 @@ describe("ctx_upgrade tool: inline fallback for missing CLI", () => {
     "utf-8",
   );
 
-  test("tries cli.bundle.mjs first", () => {
+  test("tries cli.bundle.mjs first", async () => {
     expect(serverSrc).toContain("cli.bundle.mjs");
     // The bundle path should be checked before fallback
     expect(serverSrc).toMatch(/existsSync\(bundlePath\)/);
   });
 
-  test("tries build/cli.js second", () => {
+  test("tries build/cli.js second", async () => {
     expect(serverSrc).toContain('resolve(pluginRoot, "build", "cli.js")');
   });
 
-  test("contains inline fallback with git clone when neither CLI file exists", () => {
+  test("contains inline fallback with git clone when neither CLI file exists", async () => {
     // The fallback must generate an inline script with git clone via execFileSync
     expect(serverSrc).toMatch(/git.*clone.*--depth.*1/);
     // The inline script is written to a temp .mjs file
     expect(serverSrc).toMatch(/\.ctx-upgrade-inline\.mjs/);
   });
 
-  test("inline fallback copies key files to plugin root", () => {
+  test("inline fallback copies key files to plugin root", async () => {
     // The inline script must copy build artifacts back
     expect(serverSrc).toMatch(/server\.bundle\.mjs/);
     expect(serverSrc).toMatch(/cli\.bundle\.mjs/);
     expect(serverSrc).toMatch(/npm.*install/);
   });
 
-  test("fallback only triggers when neither CLI file exists", () => {
+  test("fallback only triggers when neither CLI file exists", async () => {
     // There should be an else/fallback branch after checking both paths
     expect(serverSrc).toMatch(/existsSync\(fallbackPath\)/);
   });
@@ -1676,7 +1676,7 @@ describe("ctx_purge is the sole reset/wipe mechanism", () => {
   );
 
   // ── ctx_stats has NO reset capability ──
-  test("ctx_stats does NOT accept a reset parameter", () => {
+  test("ctx_stats does NOT accept a reset parameter", async () => {
     // Extract only the ctx_stats tool registration
     const statsMatch = serverSrc.match(
       /server\.registerTool\(\s*"ctx_stats"[\s\S]*?^\);/m,
@@ -1688,23 +1688,23 @@ describe("ctx_purge is the sole reset/wipe mechanism", () => {
   });
 
   // ── No .clear-stats flag mechanism ──
-  test("server has no checkClearStatsFlag mechanism", () => {
+  test("server has no checkClearStatsFlag mechanism", async () => {
     expect(serverSrc).not.toContain("checkClearStatsFlag");
     expect(serverSrc).not.toContain(".clear-stats");
   });
 
   // ── Routing block: no reset instructions for /clear or /compact ──
-  test("routing block does not instruct any reset after /clear or /compact", () => {
+  test("routing block does not instruct any reset after /clear or /compact", async () => {
     expect(routingBlockSrc).not.toContain("reset: true");
     expect(routingBlockSrc).not.toContain("ctx_stats(reset");
   });
 
-  test("routing block informs user about ctx_purge availability", () => {
+  test("routing block informs user about ctx_purge availability", async () => {
     expect(routingBlockSrc).toMatch(/ctx.purge/i);
   });
 
   // ── ctx_purge is the complete wipe tool ──
-  test("ctx_purge gates on confirm parameter", () => {
+  test("ctx_purge gates on confirm parameter", async () => {
     expect(serverSrc).toContain("Purge cancelled");
     expect(serverSrc).toMatch(/if \(!confirm\)/);
   });
@@ -1741,14 +1741,14 @@ describe("Platform-aware session paths via adapter", () => {
   );
 
   // ── Adapter is stored at startup ──
-  test("server stores detected adapter at startup", () => {
+  test("server stores detected adapter at startup", async () => {
     expect(serverSrc).toContain("let _detectedAdapter");
     // main() must assign the adapter after detection
     expect(serverSrc).toMatch(/_detectedAdapter\s*=\s*await\s+getAdapter/);
   });
 
   // ── No hardcoded .claude in tool handlers ──
-  test("ctx_purge has no hardcoded .claude path", () => {
+  test("ctx_purge has no hardcoded .claude path", async () => {
     const purgeMatch = serverSrc.match(
       /server\.registerTool\(\s*"ctx_purge"[\s\S]*?^\);/m,
     );
@@ -1756,7 +1756,7 @@ describe("Platform-aware session paths via adapter", () => {
     expect(purgeMatch![0]).not.toMatch(/["']\.claude["']/);
   });
 
-  test("ctx_stats has no hardcoded .claude path", () => {
+  test("ctx_stats has no hardcoded .claude path", async () => {
     const statsMatch = serverSrc.match(
       /server\.registerTool\(\s*"ctx_stats"[\s\S]*?^\);/m,
     );
@@ -1765,13 +1765,13 @@ describe("Platform-aware session paths via adapter", () => {
   });
 
   // ── Adapter methods used for session paths ──
-  test("session paths derived from adapter.getSessionDir or getSessionDBPath", () => {
+  test("session paths derived from adapter.getSessionDir or getSessionDBPath", async () => {
     // Either directly uses adapter methods or a helper that delegates to them
     expect(serverSrc).toMatch(/getSessionDir\(\)|getSessionDBPath\(/);
   });
 
   // ── Comprehensive projectDir detection ──
-  test("getProjectDir checks verified platform env vars", () => {
+  test("getProjectDir checks verified platform env vars", async () => {
     const fn = serverSrc.match(/function getProjectDir[\s\S]*?^}/m);
     expect(fn).not.toBeNull();
     const body = fn![0];
@@ -1808,7 +1808,7 @@ describe("Project dir hash consistency", () => {
     "utf-8",
   );
 
-  test("shared hashProjectDir helper exists and normalizes backslashes", () => {
+  test("shared hashProjectDir helper exists and normalizes backslashes", async () => {
     const fn = serverSrc.match(/function hashProjectDir[\s\S]*?^}/m);
     expect(fn).not.toBeNull();
     const body = fn![0];
@@ -1852,7 +1852,7 @@ describe("ctx_purge deleted array is honest", () => {
     "utf-8",
   );
 
-  test("every deleted.push in ctx_purge is guarded by a success check", () => {
+  test("every deleted.push in ctx_purge is guarded by a success check", async () => {
     const purgeMatch = serverSrc.match(
       /server\.registerTool\(\s*"ctx_purge"[\s\S]*?^\);/m,
     );
@@ -1880,7 +1880,7 @@ describe("ctx_purge deleted array is honest", () => {
 // ─── KB purge behavioral (ContentStore) ─────────────────────────────────────
 
 describe("ContentStore purge behavior", () => {
-  test("cleanup() deletes DB files (including WAL and SHM)", () => {
+  test("cleanup() deletes DB files (including WAL and SHM)", async () => {
     const tmpPath = join(tmpdir(), `ctx-purge-test-${Date.now()}.db`);
     const store = new ContentStore(tmpPath);
 
@@ -1895,7 +1895,7 @@ describe("ContentStore purge behavior", () => {
     expect(existsSync(tmpPath + "-shm")).toBe(false);
   });
 
-  test("index survives when cleanup is NOT called (--continue scenario)", () => {
+  test("index survives when cleanup is NOT called (--continue scenario)", async () => {
     const tmpPath = join(tmpdir(), `ctx-preserve-test-${Date.now()}.db`);
     const store = new ContentStore(tmpPath);
 
@@ -1913,7 +1913,7 @@ describe("ContentStore purge behavior", () => {
     store2.cleanup();
   });
 
-  test("store recovers after purge — new index works", () => {
+  test("store recovers after purge — new index works", async () => {
     const tmpPath = join(tmpdir(), `ctx-recovery-test-${Date.now()}.db`);
 
     // Phase 1: index and purge
@@ -1936,7 +1936,7 @@ describe("ContentStore purge behavior", () => {
     store2.cleanup();
   });
 
-  test("double cleanup does not crash", () => {
+  test("double cleanup does not crash", async () => {
     const tmpPath = join(tmpdir(), `ctx-double-purge-${Date.now()}.db`);
     const store = new ContentStore(tmpPath);
     store.index({ content: "some content", source: "test" });
@@ -1949,7 +1949,7 @@ describe("ContentStore purge behavior", () => {
     expect(() => store.cleanup()).not.toThrow();
   });
 
-  test("cleanup on never-indexed store does not crash", () => {
+  test("cleanup on never-indexed store does not crash", async () => {
     const tmpPath = join(tmpdir(), `ctx-empty-purge-${Date.now()}.db`);
     const store = new ContentStore(tmpPath);
 
@@ -1958,7 +1958,7 @@ describe("ContentStore purge behavior", () => {
     expect(existsSync(tmpPath)).toBe(false);
   });
 
-  test("ctx_purge handler deletes DB file even when _store is null (--continue scenario)", () => {
+  test("ctx_purge handler deletes DB file even when _store is null (--continue scenario)", async () => {
     // This tests the server.ts logic: when _store is null, ctx_purge should
     // still delete the DB file on disk using getStorePath()
     const serverSrc = readFileSync(
@@ -1986,17 +1986,17 @@ describe("Version outdated warning in trackResponse", () => {
     "utf-8",
   );
 
-  test("fetchLatestVersion function exists and uses npm registry", () => {
+  test("fetchLatestVersion function exists and uses npm registry", async () => {
     expect(serverSrc).toContain("function fetchLatestVersion");
     expect(serverSrc).toContain("registry.npmjs.org/context-mode");
   });
 
-  test("version check fires in main() after server.connect", () => {
+  test("version check fires in main() after server.connect", async () => {
     const mainFn = serverSrc.slice(serverSrc.indexOf("async function main"));
     expect(mainFn).toContain("fetchLatestVersion");
   });
 
-  test("trackResponse prepends warning when outdated", () => {
+  test("trackResponse prepends warning when outdated", async () => {
     const trackFn = serverSrc.slice(
       serverSrc.indexOf("function trackResponse"),
       serverSrc.indexOf("function trackIndexed"),
@@ -2005,13 +2005,13 @@ describe("Version outdated warning in trackResponse", () => {
     expect(trackFn).toContain("outdated");
   });
 
-  test("warning uses burst cadence (3 calls then silent)", () => {
+  test("warning uses burst cadence (3 calls then silent)", async () => {
     expect(serverSrc).toContain("VERSION_BURST_SIZE");
     expect(serverSrc).toContain("VERSION_SILENT_MS");
     expect(serverSrc).toContain("_warningBurstCount");
   });
 
-  test("getUpgradeHint returns platform-specific command", () => {
+  test("getUpgradeHint returns platform-specific command", async () => {
     expect(serverSrc).toContain("function getUpgradeHint");
     // Claude Code gets slash command
     expect(serverSrc).toMatch(/claude.code.*ctx.upgrade|ctx.upgrade.*claude.code/i);
@@ -2032,26 +2032,26 @@ describe("FS read instrumentation", () => {
     "utf-8",
   );
 
-  test("wrapper contains __CM_FS__ marker for stderr reporting", () => {
+  test("wrapper contains __CM_FS__ marker for stderr reporting", async () => {
     expect(serverSrc).toContain("__CM_FS__:");
   });
 
-  test("wrapper instruments readFileSync to count bytes", () => {
+  test("wrapper instruments readFileSync to count bytes", async () => {
     expect(serverSrc).toContain("readFileSync");
     expect(serverSrc).toContain("__cm_fs+=");
   });
 
-  test("wrapper instruments readFile (async) to count bytes", () => {
+  test("wrapper instruments readFile (async) to count bytes", async () => {
     expect(serverSrc).toMatch(/readFile/);
     expect(serverSrc).toContain("__cm_fs+=d.length");
   });
 
-  test("parses __CM_FS__ from stderr and adds to bytesSandboxed", () => {
+  test("parses __CM_FS__ from stderr and adds to bytesSandboxed", async () => {
     expect(serverSrc).toContain("__CM_FS__:(\\d+)");
     expect(serverSrc).toContain("sessionStats.bytesSandboxed += parseInt(fsMatch[1])");
   });
 
-  test("cleans __CM_FS__ marker from stderr output", () => {
+  test("cleans __CM_FS__ marker from stderr output", async () => {
     expect(serverSrc).toContain('result.stderr.replace(/\\n?__CM_FS__:\\d+\\n?/g, "")');
   });
 });
@@ -2066,40 +2066,40 @@ describe("batch_execute FS read tracking", () => {
     "utf-8",
   );
 
-  test("creates CM_FS_PRELOAD temp file with FS tracking script", () => {
+  test("creates CM_FS_PRELOAD temp file with FS tracking script", async () => {
     expect(serverSrc).toContain("CM_FS_PRELOAD");
     expect(serverSrc).toContain("cm-fs-preload-");
     // Preload script must write __CM_FS__ marker to stderr on exit
     expect(serverSrc).toMatch(/writeFileSync\(\s*CM_FS_PRELOAD/);
   });
 
-  test("sets NODE_OPTIONS with --require for batch commands", () => {
+  test("sets NODE_OPTIONS with --require for batch commands", async () => {
     expect(serverSrc).toContain("buildBatchNodeOptionsPrefix");
     expect(serverSrc).toContain("nodeOptsPrefix");
   });
 
-  test("parses __CM_FS__ from batch output and updates bytesSandboxed", () => {
+  test("parses __CM_FS__ from batch output and updates bytesSandboxed", async () => {
     expect(serverSrc).toContain("/__CM_FS__:(\\d+)/g");
     // Handler wires the FS-bytes callback to sessionStats; the runner strips/parses.
     expect(serverSrc).toContain("sessionStats.bytesSandboxed += bytes");
     expect(serverSrc).toContain("onFsBytes?.(cmdFsBytes)");
   });
 
-  test("strips __CM_FS__ markers from batch command output", () => {
+  test("strips __CM_FS__ markers from batch command output", async () => {
     expect(serverSrc).toContain('output.replace(/__CM_FS__:\\d+\\n?/g, "")');
   });
 
-  test("cleans up preload file on shutdown", () => {
+  test("cleans up preload file on shutdown", async () => {
     expect(serverSrc).toContain("unlinkSync(CM_FS_PRELOAD)");
   });
 
-  test("handler accepts concurrency input field with min/max bounds", () => {
+  test("handler accepts concurrency input field with min/max bounds", async () => {
     expect(serverSrc).toContain("concurrency: z");
     expect(serverSrc).toMatch(/\.min\(1\)\s*\n?\s*\.max\(8\)/);
     expect(serverSrc).toContain(".default(1)");
   });
 
-  test("tool description documents the concurrency field with positive guidance", () => {
+  test("tool description documents the concurrency field with positive guidance", async () => {
     // Hardened guidance per PRD-concurrency-architectural.md Section 4
     expect(serverSrc).toContain("concurrency: 4-8");
     expect(serverSrc).toContain("3-5x");
@@ -2356,12 +2356,12 @@ describe("runBatchCommands edge cases", () => {
     expect(seen[0]).toBe('NODE_OPTIONS="--require /tmp/x" echo hi 2>&1');
   });
 
-  test("buildBatchNodeOptionsPrefix formats POSIX shell assignment", () => {
+  test("buildBatchNodeOptionsPrefix formats POSIX shell assignment", async () => {
     const prefix = buildBatchNodeOptionsPrefix("bash", "/tmp/cm fs'preload.js");
     expect(prefix).toBe("NODE_OPTIONS='--require /tmp/cm fs'\\''preload.js' ");
   });
 
-  test("buildBatchNodeOptionsPrefix formats PowerShell assignment", () => {
+  test("buildBatchNodeOptionsPrefix formats PowerShell assignment", async () => {
     const prefix = buildBatchNodeOptionsPrefix(
       "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
       "C:\\Temp\\cm ' fs.js",
@@ -2369,7 +2369,7 @@ describe("runBatchCommands edge cases", () => {
     expect(prefix).toBe("$env:NODE_OPTIONS='--require C:\\Temp\\cm '' fs.js'; ");
   });
 
-  test("buildBatchNodeOptionsPrefix formats cmd assignment", () => {
+  test("buildBatchNodeOptionsPrefix formats cmd assignment", async () => {
     const prefix = buildBatchNodeOptionsPrefix(
       "C:\\Windows\\System32\\cmd.exe",
       "C:\\Temp\\cm-fs-preload.js",
@@ -2560,7 +2560,7 @@ describe("ctx_fetch_and_index batch refactor", () => {
     "utf-8",
   );
 
-  test("schema accepts both legacy {url} and batch {requests}", () => {
+  test("schema accepts both legacy {url} and batch {requests}", async () => {
     expect(fetchHandlerSrc).toContain('url: z.string().optional()');
     expect(fetchHandlerSrc).toContain('requests: z');
     // Zod array of {url, source?}
@@ -2568,7 +2568,7 @@ describe("ctx_fetch_and_index batch refactor", () => {
     expect(fetchHandlerSrc).toContain('source: z.string().optional()');
   });
 
-  test("handler exposes concurrency 1-8 with default 1", () => {
+  test("handler exposes concurrency 1-8 with default 1", async () => {
     // Find the fetch_and_index registerTool block, then assert concurrency schema near it.
     // Stop anchor: the next registerTool call (ctx_batch_execute).
     const fetchBlockMatch = fetchHandlerSrc.match(/registerTool\(\s*"ctx_fetch_and_index"[\s\S]+?registerTool\(\s*"ctx_batch_execute"/);
@@ -2579,7 +2579,7 @@ describe("ctx_fetch_and_index batch refactor", () => {
     expect(block).toContain(".default(1)");
   });
 
-  test("PARALLELIZE I/O guidance + locked requests:[] schema in description", () => {
+  test("PARALLELIZE I/O guidance + locked requests:[] schema in description", async () => {
     expect(fetchHandlerSrc).toContain("PARALLELIZE I/O");
     expect(fetchHandlerSrc).toContain("requests: [{url, source}");
     expect(fetchHandlerSrc).toContain("3-5x");
@@ -2587,7 +2587,7 @@ describe("ctx_fetch_and_index batch refactor", () => {
     expect(fetchHandlerSrc).toContain("❌");
   });
 
-  test("serial-write contract: index drain is a for-loop calling indexFetched serially", () => {
+  test("serial-write contract: index drain is a for-loop calling indexFetched serially", async () => {
     // The handler must NOT spawn parallel store.index calls. The drain is a
     // for-loop over `settled` calling indexFetched serially. Anti-pattern check.
     expect(fetchHandlerSrc).toContain("Serial index drain");
@@ -2596,7 +2596,7 @@ describe("ctx_fetch_and_index batch refactor", () => {
     expect(fetchHandlerSrc).not.toMatch(/Promise\.all\([^)]*indexFetched/);
   });
 
-  test("backward compat: legacy single-URL response wording preserved", () => {
+  test("backward compat: legacy single-URL response wording preserved", async () => {
     // Original handler returned "Cached: **${label}**" / "Fetched and indexed **N sections**"
     // The refactor must keep these EXACT strings for the legacy path so
     // tests/mcp-integration.ts and any user-side scripts grepping the response don't break.
@@ -2607,22 +2607,22 @@ describe("ctx_fetch_and_index batch refactor", () => {
     expect(fetchHandlerSrc).toContain("force: true");
   });
 
-  test("isLegacySingle gate prevents batch response wrapping for single-URL calls", () => {
+  test("isLegacySingle gate prevents batch response wrapping for single-URL calls", async () => {
     expect(fetchHandlerSrc).toContain("const isLegacySingle = !requests && batch.length === 1");
     expect(fetchHandlerSrc).toContain("if (isLegacySingle)");
   });
 
-  test("capped-concurrency note appears only when capped", () => {
+  test("capped-concurrency note appears only when capped", async () => {
     expect(fetchHandlerSrc).toMatch(/cappedNote\s*=\s*capped\s*\?/);
     // Caveman style — `cap=N/Mcpu` instead of "capped from N to M; M cores available".
     expect(fetchHandlerSrc).toContain("cap=${effectiveConcurrency}/${cpus().length}cpu");
   });
 
-  test("batch isError only when ALL URLs fail (errorCount === batch.length)", () => {
+  test("batch isError only when ALL URLs fail (errorCount === batch.length)", async () => {
     expect(fetchHandlerSrc).toContain("isError: errorCount === batch.length");
   });
 
-  test("batch preview is capped to prevent context flooding (review F2)", () => {
+  test("batch preview is capped to prevent context flooding (review F2)", async () => {
     // Per-URL preview in batch mode capped tightly so an 8-URL batch doesn't
     // dump ~24KB of context (8 × 3072 char single-URL preview cap).
     expect(fetchHandlerSrc).toContain("FETCH_BATCH_PREVIEW_LIMIT");
@@ -2634,14 +2634,14 @@ describe("ctx_fetch_and_index batch refactor", () => {
     expect(fetchHandlerSrc).toMatch(/preview\.length\s*>\s*FETCH_BATCH_PREVIEW_LIMIT/);
   });
 
-  test("batch header uses singular form for count=1 (review F5 plural fix)", () => {
+  test("batch header uses singular form for count=1 (review F5 plural fix)", async () => {
     // Per CLAUDE.md "Terse like caveman" + grammar correctness:
     // "1 errors" → "1 error" via the fmt() helper.
     expect(fetchHandlerSrc).toContain('const fmt = (n: number, sing: string, plur: string)');
     expect(fetchHandlerSrc).toContain('n === 1 ? sing : plur');
   });
 
-  test("batch header uses caveman style (review F5 terse format)", () => {
+  test("batch header uses caveman style (review F5 terse format)", async () => {
     // Old: "Batch fetched N URLs at concurrency=X (capped from Y to X; Z cores available): a fetched, b cached, c errors. d new sections (eKB total)."
     // New: "fetched N c=X cap=X/Zcpu. ok=a cache=b err=c. d sections eKB."
     expect(fetchHandlerSrc).toContain("`fetched ${batch.length} c=${effectiveConcurrency}");
@@ -2649,7 +2649,7 @@ describe("ctx_fetch_and_index batch refactor", () => {
     expect(fetchHandlerSrc).not.toContain("Batch fetched"); // old verbose wording gone
   });
 
-  test("fetchOneUrl is parallel-safe (no SQLite writes)", () => {
+  test("fetchOneUrl is parallel-safe (no SQLite writes)", async () => {
     // Verify by inspecting the helper source: it calls store.getSourceMeta (read)
     // but never store.index/indexJSON/indexPlainText (writes).
     const fetchOneSrc = fetchHandlerSrc.match(/async function fetchOneUrl\([\s\S]+?^}/m);
@@ -2661,7 +2661,7 @@ describe("ctx_fetch_and_index batch refactor", () => {
     expect(block).not.toContain("store.indexPlainText");
   });
 
-  test("indexFetched is serial-only (single FTS5 write per call)", () => {
+  test("indexFetched is serial-only (single FTS5 write per call)", async () => {
     const indexFetchedSrc = fetchHandlerSrc.match(/function indexFetched\([\s\S]+?^}/m);
     expect(indexFetchedSrc).not.toBeNull();
     const block = indexFetchedSrc![0];
@@ -2679,14 +2679,14 @@ describe("ctx_fetch_and_index batch refactor", () => {
 import { classifyIp } from "../../src/server.js";
 
 describe("classifyIp — SSRF guard IP classifier", () => {
-  test("hard-blocks IMDS / link-local IPv4 (169.254.0.0/16)", () => {
+  test("hard-blocks IMDS / link-local IPv4 (169.254.0.0/16)", async () => {
     // 169.254.169.254 = AWS/GCP/Azure cloud metadata endpoint — never legitimate
     expect(classifyIp("169.254.169.254")).toBe("block");
     expect(classifyIp("169.254.0.1")).toBe("block");
     expect(classifyIp("169.254.255.254")).toBe("block");
   });
 
-  test("hard-blocks multicast / reserved IPv4 (224+ and 0.0.0.0/8)", () => {
+  test("hard-blocks multicast / reserved IPv4 (224+ and 0.0.0.0/8)", async () => {
     expect(classifyIp("224.0.0.1")).toBe("block");
     expect(classifyIp("239.255.255.255")).toBe("block");
     expect(classifyIp("255.255.255.255")).toBe("block");
@@ -2694,13 +2694,13 @@ describe("classifyIp — SSRF guard IP classifier", () => {
     expect(classifyIp("0.1.2.3")).toBe("block");
   });
 
-  test("hard-blocks malformed IPv4", () => {
+  test("hard-blocks malformed IPv4", async () => {
     expect(classifyIp("999.999.999.999")).toBe("block");
     expect(classifyIp("not-an-ip")).toBe("block");
     expect(classifyIp("1.2.3")).toBe("block");
   });
 
-  test("hard-blocks IPv6 link-local + multicast + unspecified", () => {
+  test("hard-blocks IPv6 link-local + multicast + unspecified", async () => {
     expect(classifyIp("fe80::1")).toBe("block"); // link-local
     expect(classifyIp("ff00::1")).toBe("block"); // multicast
     expect(classifyIp("::")).toBe("block");      // unspecified
@@ -2720,20 +2720,20 @@ describe("classifyIp — SSRF guard IP classifier", () => {
     expect(classifyIp("192.168.255.255")).toBe("private");
   });
 
-  test("private: IPv6 loopback + ULA (fc00::/7)", () => {
+  test("private: IPv6 loopback + ULA (fc00::/7)", async () => {
     expect(classifyIp("::1")).toBe("private");
     expect(classifyIp("fc00::1")).toBe("private");
     expect(classifyIp("fd12:3456:789a::1")).toBe("private");
   });
 
-  test("public: real internet IPs", () => {
+  test("public: real internet IPs", async () => {
     expect(classifyIp("8.8.8.8")).toBe("public");           // Google DNS
     expect(classifyIp("1.1.1.1")).toBe("public");           // Cloudflare DNS
     expect(classifyIp("140.82.121.4")).toBe("public");      // github.com
     expect(classifyIp("2001:4860:4860::8888")).toBe("public"); // Google DNS IPv6
   });
 
-  test("IPv4-mapped IPv6 recurses through IPv4 classifier", () => {
+  test("IPv4-mapped IPv6 recurses through IPv4 classifier", async () => {
     // ::ffff:127.0.0.1 is just 127.0.0.1 wrapped in IPv6 mapping
     expect(classifyIp("::ffff:127.0.0.1")).toBe("private");
     expect(classifyIp("::ffff:169.254.169.254")).toBe("block"); // IMDS via IPv4-mapped
@@ -2747,23 +2747,23 @@ describe("SSRF guard — ssrfGuard policy in src/server.ts", () => {
     "utf-8",
   );
 
-  test("allowlists only http: and https: schemes", () => {
+  test("allowlists only http: and https: schemes", async () => {
     expect(serverSrc).toContain('parsed.protocol !== "http:"');
     expect(serverSrc).toContain('parsed.protocol !== "https:"');
     // file:// / gopher:// / javascript: implicitly rejected
   });
 
-  test("blocks IPs classified as block (link-local/IMDS/multicast)", () => {
+  test("blocks IPs classified as block (link-local/IMDS/multicast)", async () => {
     expect(serverSrc).toContain('verdict === "block"');
     expect(serverSrc).toContain("link-local / IMDS / multicast / reserved");
   });
 
-  test("strict mode opt-in via CTX_FETCH_STRICT=1", () => {
+  test("strict mode opt-in via CTX_FETCH_STRICT=1", async () => {
     expect(serverSrc).toContain('process.env.CTX_FETCH_STRICT === "1"');
     expect(serverSrc).toContain('verdict === "private" && strict');
   });
 
-  test("ssrfGuard runs BEFORE cache lookup (poisoned cache defense)", () => {
+  test("ssrfGuard runs BEFORE cache lookup (poisoned cache defense)", async () => {
     // fetchOneUrl must call ssrfGuard before getSourceMeta — otherwise a
     // previously-poisoned source label could serve attacker content from cache.
     const fetchOneSrc = serverSrc.match(/async function fetchOneUrl\([\s\S]+?^}/m);
@@ -2976,7 +2976,7 @@ describe("getSessionDir uses pre-detection when adapter not yet detected", () =>
     "utf-8",
   );
 
-  test("getSessionDir invokes detectPlatform + getSessionDirSegments before fallback", () => {
+  test("getSessionDir invokes detectPlatform + getSessionDirSegments before fallback", async () => {
     const fn = serverSrc.match(/function getSessionDir\(\)[\s\S]*?^}/m);
     expect(fn, "getSessionDir not found in server.ts").not.toBeNull();
     const body = fn![0];
@@ -2985,7 +2985,7 @@ describe("getSessionDir uses pre-detection when adapter not yet detected", () =>
     expect(body).toContain("getSessionDirSegments");
   });
 
-  test("getSessionDir falls back to .claude only as last resort", () => {
+  test("getSessionDir falls back to .claude only as last resort", async () => {
     const fn = serverSrc.match(/function getSessionDir\(\)[\s\S]*?^}/m);
     expect(fn).not.toBeNull();
     const body = fn![0];
@@ -3023,7 +3023,7 @@ describe("ctx_fetch_and_index cache key includes URL (Fix 6/10)", () => {
     expect(k1).toBe(k2);
   });
 
-  test("server.ts uses composeFetchCacheKey for cache lookup (no bare-label collision)", () => {
+  test("server.ts uses composeFetchCacheKey for cache lookup (no bare-label collision)", async () => {
     const serverSrc = readFileSync(
       resolve(__dirname, "../../src/server.ts"),
       "utf-8",

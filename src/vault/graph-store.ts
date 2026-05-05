@@ -79,6 +79,7 @@ export class VaultGraphStore {
   // Node reads
   #stmtGetNodeById!: PreparedStatement;
   #stmtGetNodeByPath!: PreparedStatement;
+  #stmtGetNodeByNotePath!: PreparedStatement;
   #stmtGetNodeByTitle!: PreparedStatement;
   #stmtGetEdgesBySource!: PreparedStatement;
   #stmtGetEdgesByTarget!: PreparedStatement;
@@ -198,6 +199,9 @@ export class VaultGraphStore {
       "SELECT * FROM vault_nodes WHERE id = ?"
     );
     this.#stmtGetNodeByPath = this.#db.prepare(
+      "SELECT * FROM vault_nodes WHERE vault_path = ? AND note_path = ?"
+    );
+    this.#stmtGetNodeByNotePath = this.#db.prepare(
       "SELECT * FROM vault_nodes WHERE note_path = ?"
     );
     this.#stmtGetNodeByTitle = this.#db.prepare(
@@ -263,9 +267,15 @@ export class VaultGraphStore {
     return row ? this.#mapNode(row) : null;
   }
 
-  /** Get a node by its note_path. */
-  getNodeByPath(notePath: string): VaultNode | null {
-    const row = this.#stmtGetNodeByPath.get(notePath) as NodeRow | undefined;
+  /** Get a node by its vault_path and note_path. */
+  getNodeByPath(vaultPath: string, notePath: string): VaultNode | null {
+    const row = this.#stmtGetNodeByPath.get(vaultPath, notePath) as NodeRow | undefined;
+    return row ? this.#mapNode(row) : null;
+  }
+
+  /** Get a node by note_path only (no vault filter — returns first match). */
+  getNodeByNotePath(notePath: string): VaultNode | null {
+    const row = this.#stmtGetNodeByNotePath.get(notePath) as NodeRow | undefined;
     return row ? this.#mapNode(row) : null;
   }
 

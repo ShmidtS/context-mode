@@ -81,7 +81,7 @@ describe("Hash-based stale detection", () => {
     expect((meta as any).filePath).toBe(filePath);
   });
 
-  test("index a file, modify it, search auto-refreshes and returns new content", () => {
+  test("index a file, modify it, search auto-refreshes and returns new content", async () => {
     const store = createStore();
     tempStores.push(store);
 
@@ -109,7 +109,7 @@ describe("Hash-based stale detection", () => {
     }
 
     // Search for NEW content — should auto-detect stale file and re-index
-    const refreshedResults = store.searchWithFallback("REST APIs GraphQL endpoints", 3);
+    const refreshedResults = await store.searchWithFallback("REST APIs GraphQL endpoints", 3);
     expect(refreshedResults.length).toBeGreaterThan(0);
     expect(refreshedResults[0].content).toContain("APIs");
 

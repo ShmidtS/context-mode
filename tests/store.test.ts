@@ -26,7 +26,7 @@ function createStore(): ContentStore {
 }
 
 describe("Schema & Lifecycle", () => {
-  test("creates store with empty stats", () => {
+  test("creates store with empty stats", async () => {
     const store = createStore();
     const stats = store.getStats();
     assert.equal(stats.sources, 0);
@@ -35,14 +35,14 @@ describe("Schema & Lifecycle", () => {
     store.close();
   });
 
-  test("close is idempotent", () => {
+  test("close is idempotent", async () => {
     const store = createStore();
     store.close();
     // second close should not throw
     assert.doesNotThrow(() => store.close());
   });
 
-  test("Fresh DB creates new FTS5 schema with 8 columns", () => {
+  test("Fresh DB creates new FTS5 schema with 8 columns", async () => {
     const dbPath = join(
       tmpdir(),
       `context-mode-test-fresh-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
@@ -86,7 +86,7 @@ describe("Schema & Lifecycle", () => {
     }
   });
 
-  test("Old schema detected and migrated to new schema", () => {
+  test("Old schema detected and migrated to new schema", async () => {
     const dbPath = join(
       tmpdir(),
       `context-mode-test-migrate-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
@@ -178,7 +178,7 @@ describe("Schema & Lifecycle", () => {
 });
 
 describe("Basic Indexing", () => {
-  test("index simple markdown content", () => {
+  test("index simple markdown content", async () => {
     const store = createStore();
     const result = store.index({
       content: "# Hello\n\nThis is a test document.",
@@ -191,7 +191,7 @@ describe("Basic Indexing", () => {
     store.close();
   });
 
-  test("index content with code blocks", () => {
+  test("index content with code blocks", async () => {
     const store = createStore();
     const result = store.index({
       content:
@@ -203,14 +203,14 @@ describe("Basic Indexing", () => {
     store.close();
   });
 
-  test("index empty content throws (falsy content requires path)", () => {
+  test("index empty content throws (falsy content requires path)", async () => {
     const store = createStore();
     // Empty string is falsy — same as not providing content
     assert.throws(() => store.index({ content: "", source: "empty" }), /Either content or path/);
     store.close();
   });
 
-  test("index whitespace-only content returns 0 chunks", () => {
+  test("index whitespace-only content returns 0 chunks", async () => {
     const store = createStore();
     const result = store.index({
       content: "   \n\n   \n",
@@ -220,7 +220,7 @@ describe("Basic Indexing", () => {
     store.close();
   });
 
-  test("index from file path", () => {
+  test("index from file path", async () => {
     const store = createStore();
     const result = store.index({
       path: join(fixtureDir, "context7-react-docs.md"),
@@ -232,13 +232,13 @@ describe("Basic Indexing", () => {
     store.close();
   });
 
-  test("index throws when neither content nor path provided", () => {
+  test("index throws when neither content nor path provided", async () => {
     const store = createStore();
     assert.throws(() => store.index({}), /Either content or path/);
     store.close();
   });
 
-  test("index reads file when content is empty string and path is provided (regression #350)", () => {
+  test("index reads file when content is empty string and path is provided (regression #350)", async () => {
     // Some MCP clients send `content: ""` together with `path`. The previous
     // implementation used `content ?? readFileSync(path)` which kept the empty
     // string and indexed 0 chunks. Empty content + a valid path must fall
@@ -255,7 +255,7 @@ describe("Basic Indexing", () => {
     store.close();
   });
 
-  test("stats update after indexing", () => {
+  test("stats update after indexing", async () => {
     const store = createStore();
     store.index({
       content: "# Title\n\nSome content.\n\n## Section\n\nMore content.",
@@ -269,7 +269,7 @@ describe("Basic Indexing", () => {
 });
 
 describe("Heading-Aware Chunking", () => {
-  test("splits on H1-H4 headings", () => {
+  test("splits on H1-H4 headings", async () => {
     const store = createStore();
     const result = store.index({
       content:
@@ -280,7 +280,7 @@ describe("Heading-Aware Chunking", () => {
     store.close();
   });
 
-  test("splits on --- separators (Context7 format)", () => {
+  test("splits on --- separators (Context7 format)", async () => {
     const store = createStore();
     const result = store.index({
       content:
@@ -291,7 +291,7 @@ describe("Heading-Aware Chunking", () => {
     store.close();
   });
 
-  test("keeps code blocks intact (never split mid-block)", () => {
+  test("keeps code blocks intact (never split mid-block)", async () => {
     const store = createStore();
     const result = store.index({
       content:
@@ -314,7 +314,7 @@ describe("Heading-Aware Chunking", () => {
     store.close();
   });
 
-  test("tracks heading hierarchy in titles", () => {
+  test("tracks heading hierarchy in titles", async () => {
     const store = createStore();
     store.index({
       content:
@@ -338,7 +338,7 @@ describe("Heading-Aware Chunking", () => {
     store.close();
   });
 
-  test("marks chunks with code as 'code' contentType", () => {
+  test("marks chunks with code as 'code' contentType", async () => {
     const store = createStore();
     store.index({
       content:
@@ -359,7 +359,7 @@ describe("Heading-Aware Chunking", () => {
 });
 
 describe("BM25 Search", () => {
-  test("basic keyword search returns results", () => {
+  test("basic keyword search returns results", async () => {
     const store = createStore();
     store.index({
       content:
@@ -375,7 +375,7 @@ describe("BM25 Search", () => {
     store.close();
   });
 
-  test("title match weighted higher than content match", () => {
+  test("title match weighted higher than content match", async () => {
     const store = createStore();
     store.index({
       content:
@@ -392,7 +392,7 @@ describe("BM25 Search", () => {
     store.close();
   });
 
-  test("porter stemming matches word variants", () => {
+  test("porter stemming matches word variants", async () => {
     const store = createStore();
     store.index({
       content:
@@ -410,7 +410,7 @@ describe("BM25 Search", () => {
     store.close();
   });
 
-  test("search with no results returns empty array", () => {
+  test("search with no results returns empty array", async () => {
     const store = createStore();
     store.index({
       content: "# React\n\nComponent lifecycle.",
@@ -421,7 +421,7 @@ describe("BM25 Search", () => {
     store.close();
   });
 
-  test("limit parameter controls result count", () => {
+  test("limit parameter controls result count", async () => {
     const store = createStore();
     store.index({
       content:
@@ -437,7 +437,7 @@ describe("BM25 Search", () => {
     store.close();
   });
 
-  test("results include source label", () => {
+  test("results include source label", async () => {
     const store = createStore();
     store.index({
       content: "# Setup\n\nInstall the package.",
@@ -449,7 +449,7 @@ describe("BM25 Search", () => {
     store.close();
   });
 
-  test("results include rank score", () => {
+  test("results include rank score", async () => {
     const store = createStore();
     store.index({
       content: "# Test\n\nSome test content here.",
@@ -463,7 +463,7 @@ describe("BM25 Search", () => {
 });
 
 describe("Multi-Source Indexing", () => {
-  test("search across multiple indexed sources", () => {
+  test("search across multiple indexed sources", async () => {
     const store = createStore();
     store.index({
       content: "# React Hooks\n\nuseEffect for side effects.",
@@ -495,7 +495,7 @@ describe("Multi-Source Indexing", () => {
     store.close();
   });
 
-  test("re-indexing same source replaces previous entry (dedup)", () => {
+  test("re-indexing same source replaces previous entry (dedup)", async () => {
     const store = createStore();
     store.index({
       content: "# Part 1\n\nFirst batch.",
@@ -513,7 +513,7 @@ describe("Multi-Source Indexing", () => {
 });
 
 describe("Fixture-Based Tests (Real MCP Output)", () => {
-  test("Context7 React docs: index and search code examples", () => {
+  test("Context7 React docs: index and search code examples", async () => {
     const store = createStore();
     const content = readFileSync(
       join(fixtureDir, "context7-react-docs.md"),
@@ -545,7 +545,7 @@ describe("Fixture-Based Tests (Real MCP Output)", () => {
     store.close();
   });
 
-  test("Context7 Next.js docs: index and search", () => {
+  test("Context7 Next.js docs: index and search", async () => {
     const store = createStore();
     const content = readFileSync(
       join(fixtureDir, "context7-nextjs-docs.md"),
@@ -564,7 +564,7 @@ describe("Fixture-Based Tests (Real MCP Output)", () => {
     store.close();
   });
 
-  test("Context7 Tailwind docs: index and search", () => {
+  test("Context7 Tailwind docs: index and search", async () => {
     const store = createStore();
     const content = readFileSync(
       join(fixtureDir, "context7-tailwind-docs.md"),
@@ -582,7 +582,7 @@ describe("Fixture-Based Tests (Real MCP Output)", () => {
     store.close();
   });
 
-  test("MCP tools JSON: index and search tool signatures", () => {
+  test("MCP tools JSON: index and search tool signatures", async () => {
     const store = createStore();
     // Convert JSON to searchable markdown format
     const raw = readFileSync(join(fixtureDir, "mcp-tools.json"), "utf-8");
@@ -608,7 +608,7 @@ describe("Fixture-Based Tests (Real MCP Output)", () => {
 });
 
 describe("Query Sanitization", () => {
-  test("handles special FTS5 characters in query", () => {
+  test("handles special FTS5 characters in query", async () => {
     const store = createStore();
     store.index({
       content: "# Test\n\nSome content here.",
@@ -626,7 +626,7 @@ describe("Query Sanitization", () => {
     store.close();
   });
 
-  test("empty query returns empty results", () => {
+  test("empty query returns empty results", async () => {
     const store = createStore();
     store.index({
       content: "# Doc\n\nContent.",
@@ -639,7 +639,7 @@ describe("Query Sanitization", () => {
 });
 
 describe("Edge Cases", () => {
-  test("content with no headings creates single chunk", () => {
+  test("content with no headings creates single chunk", async () => {
     const store = createStore();
     const result = store.index({
       content: "Just plain text without any markdown headings.",
@@ -649,7 +649,7 @@ describe("Edge Cases", () => {
     store.close();
   });
 
-  test("nested code blocks (triple backtick inside fenced)", () => {
+  test("nested code blocks (triple backtick inside fenced)", async () => {
     const store = createStore();
     const content =
       '# Example\n\n````markdown\n```javascript\nconsole.log("nested");\n```\n````';
@@ -663,7 +663,7 @@ describe("Edge Cases", () => {
     store.close();
   });
 
-  test("very long content chunks correctly", () => {
+  test("very long content chunks correctly", async () => {
     const store = createStore();
     const sections = Array.from(
       { length: 20 },
@@ -681,7 +681,7 @@ describe("Edge Cases", () => {
     store.close();
   });
 
-  test("heading-only content (no body) still creates chunk", () => {
+  test("heading-only content (no body) still creates chunk", async () => {
     const store = createStore();
     const result = store.index({
       content: "# Title Only\n\n## Another Heading",
@@ -694,7 +694,7 @@ describe("Edge Cases", () => {
 });
 
 describe("Source-Scoped Search", () => {
-  test("search with source filter returns only matching source", () => {
+  test("search with source filter returns only matching source", async () => {
     const store = createStore();
     store.index({
       content: "# Zod Transform\n\nUse .transform() to map values.\n\n## Refine\n\nUse .refine() for custom validation.",
@@ -728,7 +728,7 @@ describe("Source-Scoped Search", () => {
     store.close();
   });
 
-  test("search with non-matching source returns empty", () => {
+  test("search with non-matching source returns empty", async () => {
     const store = createStore();
     store.index({
       content: "# React Hooks\n\nuseEffect for side effects.",
@@ -739,7 +739,7 @@ describe("Source-Scoped Search", () => {
     store.close();
   });
 
-  test("listSources returns all indexed sources", () => {
+  test("listSources returns all indexed sources", async () => {
     const store = createStore();
     store.index({ content: "# A\n\nContent A.", source: "Source A" });
     store.index({ content: "# B\n\nContent B.", source: "Source B" });
@@ -755,7 +755,7 @@ describe("Source-Scoped Search", () => {
     store.close();
   });
 
-  test("source filter uses partial match (LIKE)", () => {
+  test("source filter uses partial match (LIKE)", async () => {
     const store = createStore();
     store.index({ content: "# Config\n\nDatabase config.", source: "Node.js v22 CHANGELOG" });
     store.index({ content: "# Config\n\nApp config.", source: "Zod API docs" });
@@ -772,7 +772,7 @@ describe("Source-Scoped Search", () => {
 });
 
 describe("Context Savings Measurement", () => {
-  test("index+search uses less context than raw content", () => {
+  test("index+search uses less context than raw content", async () => {
     const store = createStore();
     const content = readFileSync(
       join(fixtureDir, "context7-react-docs.md"),
@@ -798,7 +798,7 @@ describe("Context Savings Measurement", () => {
 });
 
 describe("Plain Text Indexing", () => {
-  test("indexPlainText: chunks by line groups", () => {
+  test("indexPlainText: chunks by line groups", async () => {
     const store = createStore();
     const lines = Array.from({ length: 100 }, (_, i) => `Log line ${i + 1}: processing request`).join("\n");
     const result = store.indexPlainText(lines, "build-output");
@@ -808,7 +808,7 @@ describe("Plain Text Indexing", () => {
     store.close();
   });
 
-  test("indexPlainText: single chunk for small output", () => {
+  test("indexPlainText: single chunk for small output", async () => {
     const store = createStore();
     const content = "Line 1\nLine 2\nLine 3";
     const result = store.indexPlainText(content, "small-output");
@@ -817,7 +817,7 @@ describe("Plain Text Indexing", () => {
     store.close();
   });
 
-  test("indexPlainText: blank-line splitting for sectioned output", () => {
+  test("indexPlainText: blank-line splitting for sectioned output", async () => {
     const store = createStore();
     const content = [
       "Section A line 1\nSection A line 2",
@@ -829,7 +829,7 @@ describe("Plain Text Indexing", () => {
     store.close();
   });
 
-  test("indexPlainText: searchable after indexing", () => {
+  test("indexPlainText: searchable after indexing", async () => {
     const store = createStore();
     const lines = Array.from({ length: 200 }, (_, i) => {
       if (i === 149) return "ERROR: connection refused to database host";
@@ -845,7 +845,7 @@ describe("Plain Text Indexing", () => {
     store.close();
   });
 
-  test("indexPlainText: empty content returns 0 chunks", () => {
+  test("indexPlainText: empty content returns 0 chunks", async () => {
     const store = createStore();
     const result = store.indexPlainText("", "empty-output");
     assert.equal(result.totalChunks, 0, "Empty content should produce 0 chunks");
@@ -853,7 +853,7 @@ describe("Plain Text Indexing", () => {
     store.close();
   });
 
-  test("indexPlainText: in-memory store works", () => {
+  test("indexPlainText: in-memory store works", async () => {
     const store = new ContentStore(":memory:");
     const content = "Line 1\nLine 2\nLine 3";
     const result = store.indexPlainText(content, "memory-test");
@@ -868,7 +868,7 @@ describe("Plain Text Indexing", () => {
 });
 
 describe("getDistinctiveTerms", () => {
-  test("getDistinctiveTerms: returns terms in moderate frequency range", () => {
+  test("getDistinctiveTerms: returns terms in moderate frequency range", async () => {
     const store = createStore();
     // Create content with 10 sections. A distinctive term appears in 3-4 sections
     // (i.e., >= 2 and <= 40% of 10 = 4).
@@ -890,7 +890,7 @@ describe("getDistinctiveTerms", () => {
     store.close();
   });
 
-  test("getDistinctiveTerms: returns empty for too few sections", () => {
+  test("getDistinctiveTerms: returns empty for too few sections", async () => {
     const store = createStore();
     // Only 2 sections — below the chunk_count < 3 threshold
     const content = "Section A content here.\n\nSection B content here.";
@@ -901,7 +901,7 @@ describe("getDistinctiveTerms", () => {
     store.close();
   });
 
-  test("getDistinctiveTerms: excludes stopwords", () => {
+  test("getDistinctiveTerms: excludes stopwords", async () => {
     const store = createStore();
     // Create 5 sections where stopwords "the", "this", "that", "with" appear in every section.
     // "encryption" appears in 2 sections (moderate frequency).
@@ -930,7 +930,7 @@ describe("getDistinctiveTerms", () => {
 });
 
 describe("Smart Chunk Titles", () => {
-  test("smart chunk titles: blank-line split uses first line as title", () => {
+  test("smart chunk titles: blank-line split uses first line as title", async () => {
     const store = createStore();
     // 4 blank-line-separated sections with meaningful first lines
     const content = [
@@ -964,7 +964,7 @@ describe("Smart Chunk Titles", () => {
     store.close();
   });
 
-  test("smart chunk titles: line-group chunks use first line as title", () => {
+  test("smart chunk titles: line-group chunks use first line as title", async () => {
     const store = createStore();
     // Create enough lines (>20) to trigger line-group chunking (not blank-line splitting)
     // by making it a single block of lines with no blank-line sections
@@ -994,7 +994,7 @@ describe("Smart Chunk Titles", () => {
 });
 
 describe("DB Cleanup", () => {
-  test("cleanupStaleDBs removes files for dead PIDs", () => {
+  test("cleanupStaleDBs removes files for dead PIDs", async () => {
     const fakePid = 99999;
     const fakePath = join(tmpdir(), `context-mode-${fakePid}.db`);
     writeFileSync(fakePath, "fake");
@@ -1008,7 +1008,7 @@ describe("DB Cleanup", () => {
     assert.ok(!existsSync(fakePath + "-shm"), "SHM file should be removed");
   });
 
-  test("cleanupStaleDBs does not remove current process DB", () => {
+  test("cleanupStaleDBs does not remove current process DB", async () => {
     const myPath = join(tmpdir(), `context-mode-${process.pid}.db`);
     writeFileSync(myPath, "current");
 
@@ -1019,7 +1019,7 @@ describe("DB Cleanup", () => {
     try { require("fs").unlinkSync(myPath); } catch {}
   });
 
-  test("store.cleanup() removes own DB and WAL/SHM files", () => {
+  test("store.cleanup() removes own DB and WAL/SHM files", async () => {
     const store = createStore();
     // Index something to generate WAL activity
     store.index({ content: "# Test\n\nCleanup test content.", source: "cleanup-test" });
@@ -1039,7 +1039,7 @@ describe("DB Cleanup", () => {
     store.close();
   });
 
-  test("store.cleanup() is safe to call multiple times", () => {
+  test("store.cleanup() is safe to call multiple times", async () => {
     const path = join(tmpdir(), `context-mode-cleanup-idempotent-${Date.now()}.db`);
     const store = new ContentStore(path);
     store.cleanup();
@@ -1049,7 +1049,7 @@ describe("DB Cleanup", () => {
 });
 
 describe("Max Chunk Size", () => {
-  test("splits oversized markdown chunk at paragraph boundaries", () => {
+  test("splits oversized markdown chunk at paragraph boundaries", async () => {
     const store = createStore();
     const paragraphs = Array.from({ length: 20 }, (_, i) =>
       `Paragraph ${i + 1}. ${"Lorem ipsum dolor sit amet. ".repeat(20)}`
@@ -1066,7 +1066,7 @@ describe("Max Chunk Size", () => {
     store.close();
   });
 
-  test("does not split chunks already under maxChunkBytes", () => {
+  test("does not split chunks already under maxChunkBytes", async () => {
     const store = createStore();
     const content = `# Small Section\n\nJust a few lines of text.\n\nAnother paragraph.`;
     const result = store.index({ content, source: "small-chunk-test" });
@@ -1074,7 +1074,7 @@ describe("Max Chunk Size", () => {
     store.close();
   });
 
-  test("keeps code blocks intact when splitting oversized chunks", () => {
+  test("keeps code blocks intact when splitting oversized chunks", async () => {
     const store = createStore();
     const codeBlock = "```typescript\n" + "const x = 1;\n".repeat(100) + "```";
     const prose = Array.from({ length: 10 }, (_, i) =>
@@ -1096,7 +1096,7 @@ describe("Max Chunk Size", () => {
 });
 
 describe("JSON Chunking (Objects)", () => {
-  test("chunks JSON object by top-level keys", () => {
+  test("chunks JSON object by top-level keys", async () => {
     const store = createStore();
     const json = JSON.stringify({
       authentication: {
@@ -1121,7 +1121,7 @@ describe("JSON Chunking (Objects)", () => {
     store.close();
   });
 
-  test("small JSON object becomes single chunk", () => {
+  test("small JSON object becomes single chunk", async () => {
     const store = createStore();
     const json = JSON.stringify({ name: "Alice", role: "admin" });
     const result = store.indexJSON(json, "small");
@@ -1129,7 +1129,7 @@ describe("JSON Chunking (Objects)", () => {
     store.close();
   });
 
-  test("chunks nested JSON with path titles", () => {
+  test("chunks nested JSON with path titles", async () => {
     const store = createStore();
     const endpoints: Record<string, unknown> = {};
     for (let i = 0; i < 30; i++) {
@@ -1149,7 +1149,7 @@ describe("JSON Chunking (Objects)", () => {
     store.close();
   });
 
-  test("handles invalid JSON gracefully by falling back to plain text", () => {
+  test("handles invalid JSON gracefully by falling back to plain text", async () => {
     const store = createStore();
     const result = store.indexJSON("not valid json {{{", "bad-json");
     assert.ok(result.totalChunks >= 1, "Should still index as plain text");
@@ -1158,7 +1158,7 @@ describe("JSON Chunking (Objects)", () => {
 });
 
 describe("JSON Chunking (Arrays)", () => {
-  test("top-level array of objects uses identity field in titles", () => {
+  test("top-level array of objects uses identity field in titles", async () => {
     const store = createStore();
     const users = Array.from({ length: 50 }, (_, i) => ({
       id: i + 1,
@@ -1176,7 +1176,7 @@ describe("JSON Chunking (Arrays)", () => {
     store.close();
   });
 
-  test("identity field appears in chunk titles", () => {
+  test("identity field appears in chunk titles", async () => {
     const store = createStore();
     const items = [
       { name: "Alice", role: "admin", data: "x".repeat(2000) },
@@ -1197,7 +1197,7 @@ describe("JSON Chunking (Arrays)", () => {
     store.close();
   });
 
-  test("array of primitives becomes batched chunks", () => {
+  test("array of primitives becomes batched chunks", async () => {
     const store = createStore();
     const longStrings = Array.from({ length: 100 }, (_, i) =>
       `Item ${i}: ${"content ".repeat(50)}`
@@ -1209,7 +1209,7 @@ describe("JSON Chunking (Arrays)", () => {
     store.close();
   });
 
-  test("nested array within object uses full key path", () => {
+  test("nested array within object uses full key path", async () => {
     const store = createStore();
     const json = JSON.stringify({
       api: {
@@ -1235,7 +1235,7 @@ describe("JSON Chunking (Arrays)", () => {
 });
 
 describe("Content-Type Routing", () => {
-  test("indexJSON produces searchable chunks from pretty-printed JSON", () => {
+  test("indexJSON produces searchable chunks from pretty-printed JSON", async () => {
     const store = createStore();
     const apiResponse = JSON.stringify({
       data: {
@@ -1255,7 +1255,7 @@ describe("Content-Type Routing", () => {
     store.close();
   });
 
-  test("indexPlainText handles non-JSON non-HTML content", () => {
+  test("indexPlainText handles non-JSON non-HTML content", async () => {
     const store = createStore();
     const plainText = "name,email,role\nAlice,alice@example.com,admin\nBob,bob@example.com,user";
     const result = store.indexPlainText(plainText, "csv-response");
@@ -1267,14 +1267,14 @@ describe("Content-Type Routing", () => {
 // ── Source metadata & TTL cache ───────────────────────────────────────
 
 describe("Source metadata (TTL cache)", () => {
-  test("getSourceMeta returns null for unknown source", () => {
+  test("getSourceMeta returns null for unknown source", async () => {
     const store = createStore();
     const meta = store.getSourceMeta("nonexistent-source");
     expect(meta).toBeNull();
     store.close();
   });
 
-  test("getSourceMeta returns metadata after indexing", () => {
+  test("getSourceMeta returns metadata after indexing", async () => {
     const store = createStore();
     store.index({ content: "# Hello\nWorld", source: "test-doc" });
     const meta = store.getSourceMeta("test-doc");
@@ -1285,7 +1285,7 @@ describe("Source metadata (TTL cache)", () => {
     store.close();
   });
 
-  test("getSourceMeta indexedAt is valid datetime", () => {
+  test("getSourceMeta indexedAt is valid datetime", async () => {
     const store = createStore();
     store.index({ content: "# Test\nContent here", source: "datetime-test" });
     const meta = store.getSourceMeta("datetime-test");
@@ -1294,7 +1294,7 @@ describe("Source metadata (TTL cache)", () => {
     store.close();
   });
 
-  test("getSourceMeta updates after re-indexing same source", () => {
+  test("getSourceMeta updates after re-indexing same source", async () => {
     const store = createStore();
     store.index({ content: "# V1\nFirst version", source: "evolving-doc" });
     const meta1 = store.getSourceMeta("evolving-doc");
@@ -1308,7 +1308,7 @@ describe("Source metadata (TTL cache)", () => {
 // ── Persistent content store lifecycle ────────────────────────────────
 
 describe("Persistent content store lifecycle", () => {
-  test("cleanupStaleSources keeps recent sources and returns 0", () => {
+  test("cleanupStaleSources keeps recent sources and returns 0", async () => {
     const store = createStore();
     store.index({ content: "# Fresh doc\nContent", source: "fresh-source" });
     const deleted = store.cleanupStaleSources(30);
@@ -1320,7 +1320,7 @@ describe("Persistent content store lifecycle", () => {
     store.close();
   });
 
-  test("cleanupStaleSources returns number type", () => {
+  test("cleanupStaleSources returns number type", async () => {
     const store = createStore();
     store.index({ content: "# Test\nContent", source: "test-source" });
     const deleted = store.cleanupStaleSources(365);
@@ -1328,7 +1328,7 @@ describe("Persistent content store lifecycle", () => {
     store.close();
   });
 
-  test("getDBSizeBytes returns positive number after indexing", () => {
+  test("getDBSizeBytes returns positive number after indexing", async () => {
     const store = createStore();
     store.index({ content: "# Test\nSome content for size", source: "size-test" });
     const size = store.getDBSizeBytes();
@@ -1336,7 +1336,7 @@ describe("Persistent content store lifecycle", () => {
     store.close();
   });
 
-  test("store data persists after close and reopen at same path", () => {
+  test("store data persists after close and reopen at same path", async () => {
     const dbPath = join(tmpdir(), `persist-test-${Date.now()}.db`);
     const store1 = new ContentStore(dbPath);
     store1.index({ content: "# Persistent\nThis should survive", source: "persist-doc" });
@@ -1350,7 +1350,7 @@ describe("Persistent content store lifecycle", () => {
     store2.cleanup();
   });
 
-  test("deleting DB file before creating store gives fresh state", () => {
+  test("deleting DB file before creating store gives fresh state", async () => {
     const dbPath = join(tmpdir(), `fresh-test-${Date.now()}.db`);
     const store1 = new ContentStore(dbPath);
     store1.index({ content: "# Old\nOld content", source: "old-doc" });
@@ -1372,7 +1372,7 @@ describe("Persistent content store lifecycle", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("SQLITE_BUSY retry logic", () => {
-  test("ContentStore uses 30s timeout", () => {
+  test("ContentStore uses 30s timeout", async () => {
     const storeSrc = readFileSync(
       join(__dirname, "../src/store.ts"),
       "utf-8",
@@ -1380,7 +1380,7 @@ describe("SQLITE_BUSY retry logic", () => {
     expect(storeSrc).toContain("timeout: 30000");
   });
 
-  test("withRetry retries on SQLITE_BUSY and succeeds", () => {
+  test("withRetry retries on SQLITE_BUSY and succeeds", async () => {
     let attempts = 0;
     const result = withRetry(() => {
       attempts++;
@@ -1393,7 +1393,7 @@ describe("SQLITE_BUSY retry logic", () => {
     expect(attempts).toBe(3);
   });
 
-  test("withRetry throws after max retries exhausted", () => {
+  test("withRetry throws after max retries exhausted", async () => {
     expect(() => {
       withRetry(() => {
         throw new Error("SQLITE_BUSY: database is locked");
@@ -1401,7 +1401,7 @@ describe("SQLITE_BUSY retry logic", () => {
     }).toThrow(/SQLITE_BUSY.*3 retries/);
   });
 
-  test("withRetry retries on SQLITE_BUSY with zero delays", () => {
+  test("withRetry retries on SQLITE_BUSY with zero delays", async () => {
     let attempts = 0;
     const result = withRetry(() => {
       attempts++;
@@ -1414,7 +1414,7 @@ describe("SQLITE_BUSY retry logic", () => {
     expect(attempts).toBe(3);
   });
 
-  test("withRetry throws after all retries with zero delays", () => {
+  test("withRetry throws after all retries with zero delays", async () => {
     expect(() => {
       withRetry(() => {
         throw new Error("database is locked");
@@ -1422,7 +1422,7 @@ describe("SQLITE_BUSY retry logic", () => {
     }).toThrow(/SQLITE_BUSY.*3 retries/);
   });
 
-  test("withRetry rethrows non-BUSY errors immediately", () => {
+  test("withRetry rethrows non-BUSY errors immediately", async () => {
     let attempts = 0;
     expect(() => {
       withRetry(() => {
@@ -1437,12 +1437,12 @@ describe("SQLITE_BUSY retry logic", () => {
 // ── withRetry coverage for all write/read paths ──
 
 describe("withRetry edge cases", () => {
-  test("withRetry succeeds on first attempt", () => {
+  test("withRetry succeeds on first attempt", async () => {
     const result = withRetry(() => "immediate", [0, 0, 0]);
     expect(result).toBe("immediate");
   });
 
-  test("withRetry recovers on last retry", () => {
+  test("withRetry recovers on last retry", async () => {
     let attempts = 0;
     const result = withRetry(() => {
       attempts++;
@@ -1455,7 +1455,7 @@ describe("withRetry edge cases", () => {
     expect(attempts).toBe(4); // 1 initial + 3 retries
   });
 
-  test("withRetry handles 'database is locked' without SQLITE_BUSY prefix", () => {
+  test("withRetry handles 'database is locked' without SQLITE_BUSY prefix", async () => {
     let attempts = 0;
     const result = withRetry(() => {
       attempts++;
@@ -1468,7 +1468,7 @@ describe("withRetry edge cases", () => {
     expect(attempts).toBe(2);
   });
 
-  test("withRetry with empty delays array throws immediately on BUSY", () => {
+  test("withRetry with empty delays array throws immediately on BUSY", async () => {
     expect(() => {
       withRetry(() => {
         throw new Error("SQLITE_BUSY: database is locked");
@@ -1476,7 +1476,7 @@ describe("withRetry edge cases", () => {
     }).toThrow(/SQLITE_BUSY.*0 retries/);
   });
 
-  test("withRetry preserves return type", () => {
+  test("withRetry preserves return type", async () => {
     const obj = withRetry(() => ({ key: "value", num: 42 }), [0]);
     expect(obj).toEqual({ key: "value", num: 42 });
   });
@@ -1485,7 +1485,7 @@ describe("withRetry edge cases", () => {
 // ── Concurrent write resilience ──
 
 describe("concurrent DB access", () => {
-  test("two ContentStore instances can write to the same DB file", () => {
+  test("two ContentStore instances can write to the same DB file", async () => {
     const dbPath = join(tmpdir(), `concurrent-write-${Date.now()}.db`);
     const store1 = new ContentStore(dbPath);
     const store2 = new ContentStore(dbPath);
@@ -1504,7 +1504,7 @@ describe("concurrent DB access", () => {
     store2.close();
   });
 
-  test("indexPlainText is protected by withRetry", () => {
+  test("indexPlainText is protected by withRetry", async () => {
     // Verify indexPlainText doesn't throw on transient BUSY by testing
     // concurrent plain text indexing on same DB
     const dbPath = join(tmpdir(), `concurrent-plaintext-${Date.now()}.db`);
@@ -1523,7 +1523,7 @@ describe("concurrent DB access", () => {
     store2.close();
   });
 
-  test("indexJSON is protected by withRetry", () => {
+  test("indexJSON is protected by withRetry", async () => {
     const dbPath = join(tmpdir(), `concurrent-json-${Date.now()}.db`);
     const store1 = new ContentStore(dbPath);
     const store2 = new ContentStore(dbPath);
@@ -1538,7 +1538,7 @@ describe("concurrent DB access", () => {
     store2.close();
   });
 
-  test("search and searchTrigram work under concurrent writes", () => {
+  test("search and searchTrigram work under concurrent writes", async () => {
     const dbPath = join(tmpdir(), `concurrent-search-${Date.now()}.db`);
     const store1 = new ContentStore(dbPath);
     const store2 = new ContentStore(dbPath);
@@ -1558,7 +1558,7 @@ describe("concurrent DB access", () => {
 // ── WAL checkpoint on close (#244) ──
 
 describe("closeDB — WAL checkpoint", () => {
-  test("closeDB checkpoints WAL so no -wal file remains", () => {
+  test("closeDB checkpoints WAL so no -wal file remains", async () => {
     const dbPath = join(tmpdir(), `wal-test-${Date.now()}.db`);
     const Database = loadDatabase();
     const db = Database(dbPath, { timeout: 30000 });
@@ -1606,7 +1606,7 @@ describe("ContentStore — corrupt DB recovery", () => {
     store.cleanup();
   });
 
-  test("non-SQLite errors still throw", () => {
+  test("non-SQLite errors still throw", async () => {
     // A path to a directory (not a file) should throw a non-corruption error
     expect(() => new ContentStore(tmpdir())).toThrow();
   });
@@ -1617,7 +1617,7 @@ describe("ContentStore — corrupt DB recovery", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("mmap_size pragma", () => {
-  test("mmap_size is set on new ContentStore", () => {
+  test("mmap_size is set on new ContentStore", async () => {
     const dbPath = join(tmpdir(), `ctx-mmap-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
     const store = new ContentStore(dbPath);
     store.indexPlainText("Memory-mapped I/O test content for FTS5 search", "mmap-test");
@@ -1632,7 +1632,7 @@ describe("mmap_size pragma", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("FTS5 periodic optimize", () => {
-  test("search works correctly after OPTIMIZE_EVERY inserts", () => {
+  test("search works correctly after OPTIMIZE_EVERY inserts", async () => {
     const dbPath = join(tmpdir(), `ctx-optimize-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
     const store = new ContentStore(dbPath);
 
@@ -1647,7 +1647,7 @@ describe("FTS5 periodic optimize", () => {
     store.cleanup();
   });
 
-  test("close() does not throw even after many inserts", () => {
+  test("close() does not throw even after many inserts", async () => {
     const dbPath = join(tmpdir(), `ctx-optimize-close-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
     const store = new ContentStore(dbPath);
 
@@ -1658,7 +1658,7 @@ describe("FTS5 periodic optimize", () => {
     expect(() => store.close()).not.toThrow();
   });
 
-  test("OPTIMIZE_EVERY is a reasonable value", () => {
+  test("OPTIMIZE_EVERY is a reasonable value", async () => {
     expect(ContentStore.OPTIMIZE_EVERY).toBeGreaterThanOrEqual(20);
     expect(ContentStore.OPTIMIZE_EVERY).toBeLessThanOrEqual(200);
   });
@@ -1715,7 +1715,7 @@ describe("Sanitize query token deduplication", () => {
     );
   });
 
-  test("search returns identical results for duplicated and deduplicated queries", () => {
+  test("search returns identical results for duplicated and deduplicated queries", async () => {
     const store = createStore();
     store.index({
       content:
@@ -1736,7 +1736,7 @@ describe("Sanitize query token deduplication", () => {
 });
 
 describe("Stopword filtering in search queries", () => {
-  test("stopwords are filtered from search — meaningful terms drive ranking", () => {
+  test("stopwords are filtered from search — meaningful terms drive ranking", async () => {
     const store = createStore();
     // "fix" and "update" are stopwords in the domain list.
     // "database" and "connection" are meaningful terms.
@@ -1757,7 +1757,7 @@ describe("Stopword filtering in search queries", () => {
     store.close();
   });
 
-  test("all-stopword query still returns results (fallback)", () => {
+  test("all-stopword query still returns results (fallback)", async () => {
     const store = createStore();
     store.index({
       content: "# Updates\n\nUpdate the test runner to fix the issue.\n\n# Other\n\nUnrelated content.",
@@ -1770,7 +1770,7 @@ describe("Stopword filtering in search queries", () => {
     store.close();
   });
 
-  test("stopwords filtered from trigram search", () => {
+  test("stopwords filtered from trigram search", async () => {
     const store = createStore();
     store.index({
       content:
@@ -1788,7 +1788,7 @@ describe("Stopword filtering in search queries", () => {
     store.close();
   });
 
-  test("proximity reranking ignores stopwords for boost calculation", () => {
+  test("proximity reranking ignores stopwords for boost calculation", async () => {
     const store = createStore();
     // Two chunks: one has "database error" close together, the other has them far apart
     // but has "fix" (stopword) nearby
@@ -1798,7 +1798,7 @@ describe("Stopword filtering in search queries", () => {
       source: "proximity-stopwords",
     });
 
-    const results = store.searchWithFallback("fix database error", 2);
+    const results = await store.searchWithFallback("fix database error", 2);
     assert.ok(results.length > 0, "Should return results");
     // The chunk with "database" and "error" close together should rank higher
     // because "fix" (stopword) is excluded from proximity calculation
