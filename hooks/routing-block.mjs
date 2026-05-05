@@ -32,6 +32,12 @@ export function createRoutingBlock(t, options = {}) {
        - All follow-up questions. ONE call, many queries (default relevance mode).
     3. PROCESSING: ${t("ctx_execute")}(language, code) | ${t("ctx_execute_file")}(path, language, code)
        - API calls, log analysis, data processing.
+    4. VAULT GRAPH: ${t("ctx_vault_graph")}(mode, nodePath|tag)
+       - Traverse indexed vault graph: neighbors (N-hop BFS), backlinks (reverse links), tag-cluster.
+       - Use when: exploring relationships between markdown notes, code dependencies,
+         or user mentions wiki-links [[...]], tags, backlinks, obsidian, vault, related files.
+       - Project auto-indexes on first access — call directly. For custom vaults, index first with
+         ${t("ctx_vault_index")}(vaultPath).
   </tool_selection_hierarchy>
 
   <forbidden_actions>
@@ -84,6 +90,9 @@ ${includeCommands ? `
 
     "ctx purge" | "ctx-purge" | "/ctx-purge" | wipe/reset knowledge base
     → Call purge MCP tool with confirm: true. Warn: irreversible.
+
+    "vault graph" | "backlinks" | "neighbors" | "tag cluster" | "obsidian" | "wiki-links" | "related notes"
+    → Call ${t("ctx_vault_graph")}(mode, nodePath|tag). Project auto-indexes on first access.
 
     After /clear or /compact: knowledge base preserved. Tell user: "context-mode knowledge base preserved. Use \`ctx purge\` to start fresh."
   </ctx_commands>
