@@ -3058,6 +3058,240 @@ server.registerTool(
 );
 
 // ─────────────────────────────────────────────────────────
+// Tool: vault_index
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Open the shared vault graph store using the same DB path as ContentStore.
+ * Uses the graph-store.ts VaultGraphStore (the one search.ts depends on).
+ */
+async function getVaultStore() {
+  const Database = loadDatabase();
+  const db = new Database(getStorePath());
+  db.pragma("journal_mode = WAL");
+  const { VaultGraphStore } = await import("./vault/graph-store.js");
+  return { store: new VaultGraphStore(db), db };
+}
+
+server.registerTool(
+  "ctx_vault_index",
+  {
+    title: "Index Obsidian Vault",
+    description:
+      "Index an Obsidian vault into a searchable graph store. Scans markdown notes, " +
+      "extracts wikilinks, tags, and frontmatter, and builds a navigable knowledge graph. " +
+      "After indexing, use ctx_vault_graph to traverse the graph (neighbors, backlinks, tag clusters).",
+    inputSchema: z.object({
+      vaultPath: z.string().describe("Absolute path to the Obsidian vault root directory"),
+      options: z.object({
+        reindex: z.boolean().optional().describe("Force full reindex even if no changes detected"),
+      }).optional(),
+    }),
+  },
+  async (args) => {
+    const { vaultPath } = args;
+    // Validate path exists and is directory
+    let stats;
+    try {
+      stats = statSync(vaultPath);
+    } catch {
+      stats = null;
+    }
+    if (!stats || !stats.isDirectory()) {
+      return trackResponse("ctx_vault_index", {
+        content: [{
+          type: "text" as const,
+          text: `Vault path does not exist or is not a directory: ${vaultPath}`,
+        }],
+        isError: true,
+      });
+    }
+
+    // Defense in depth: reject relative paths and parent-dir escapes
+    const resolvedVaultPath = resolve(vaultPath);
+    if (!isAbsolute(resolvedVaultPath) || resolvedVaultPath.includes("..") || resolvedVaultPath.includes("..\\")) {
+      return trackResponse("ctx_vault_index", {
+        content: [{
+          type: "text" as const,
+          text: `Invalid vault path: ${vaultPath}`,
+        }],
+        isError: true,
+      });
+    }
+
+    try {
+      // Import indexer — uses its own VaultGraphStore interface (adapter pattern)
+      const { indexVault } = await import("./vault/indexer.js");
+      const { addVaultConfig } = await import("./vault/config.js");
+
+      // Open shared DB and create graph store
+      const { store, db } = await getVaultStore();
+      try {
+        // Adapter: wrap graph-store.ts VaultGraphStore to match indexer's VaultGraphStore interface
+        const adapter: import("./vault/indexer.js").VaultGraphStore = {
+          getNode: (path: string) => {
+            const n = store.getNodeByPath(path);
+            return n ? {
+              path: n.note_path,
+              title: n.title,
+              frontmatter: n.frontmatter ? JSON.parse(n.frontmatter) : {},
+              tags: store.getTagsByNode(n.id).map((t: { tag: string }) => t.tag),
+              contentHash: n.content_hash,
+              mtimeMs: n.file_mtime,
+              inDegree: n.in_degree,
+            } : undefined;
+          },
+          upsertNode: (node) => {
+            const fm = node.frontmatter && Object.keys(node.frontmatter).length > 0
+              ? JSON.stringify(node.frontmatter) : null;
+            const id = store.upsertNode("", node.path, node.title, fm, node.contentHash, node.mtimeMs, null);
+            // Insert inline tags into vault_tags table
+            store.deleteTagsByNode(id);
+            for (const tag of node.tags ?? []) {
+              store.insertTag(tag, id);
+            }
+          },
+          upsertEdge: (edge) => {
+            const sourceNode = store.getNodeByPath(edge.sourcePath);
+            const targetNode = edge.targetPath ? store.getNodeByPath(edge.targetPath) : null;
+            if (!sourceNode) return;
+            store.insertEdge(
+              sourceNode.id,
+              targetNode?.id ?? null,
+              edge.targetName ?? edge.targetPath ?? edge.sourcePath,
+              edge.alias ?? null,
+              edge.lineNumber,
+              edge.context ?? null,
+              edge.linkType,
+            );
+          },
+          removeEdgesFrom: (sourcePath: string) => {
+            const node = store.getNodeByPath(sourcePath);
+            if (node) store.deleteEdgesBySource(node.id);
+          },
+        };
+
+        // Reindex: clear all vault tables if requested
+        if (args.options?.reindex) {
+          try {
+            store.db.exec("DELETE FROM vault_edges");
+            store.db.exec("DELETE FROM vault_tags");
+            store.db.exec("DELETE FROM vault_frontmatter_keys");
+            store.db.exec("DELETE FROM vault_nodes");
+          } catch { /* best effort */ }
+        }
+
+        const result = indexVault(vaultPath, adapter);
+
+        // Recalculate in/out degrees for all nodes
+        const nodeIds = store.db.prepare("SELECT id FROM vault_nodes").all() as { id: number }[];
+        for (const { id } of nodeIds) {
+          store.recalcDegrees(id);
+        }
+
+        const edgeCount = store.getEdgeCount();
+
+        // Save config
+        addVaultConfig({
+          vaultPath,
+          lastIndexedAt: new Date().toISOString(),
+          noteCount: result.indexed + result.updated,
+          edgeCount,
+        });
+
+        return trackResponse("ctx_vault_index", {
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        });
+      } finally {
+        db.close();
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return trackResponse("ctx_vault_index", {
+        content: [{ type: "text" as const, text: `Vault index error: ${message}` }],
+        isError: true,
+      });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────
+// Tool: vault_graph
+// ─────────────────────────────────────────────────────────
+
+server.registerTool(
+  "ctx_vault_graph",
+  {
+    title: "Query Vault Graph",
+    description:
+      "Traverse the indexed Obsidian vault graph. Requires prior indexing via ctx_vault_index.\n\n" +
+      "Modes:\n" +
+      "  - neighbors: find notes within N hops of a given note\n" +
+      "  - backlinks: find all notes that link to a given note\n" +
+      "  - tag-cluster: find all notes sharing a given tag",
+    inputSchema: z.object({
+      mode: z.enum(["neighbors", "backlinks", "tag-cluster"]).describe("Graph traversal mode"),
+      nodePath: z.string().optional().describe("Path to vault note (relative to vault root)"),
+      tag: z.string().optional().describe("Tag to cluster around (for tag-cluster mode)"),
+      maxHops: z.number().min(1).max(5).optional().default(1).describe("Max hops for neighbor traversal"),
+      limit: z.number().min(1).max(100).optional().default(20).describe("Max results"),
+    }),
+  },
+  async (args) => {
+    try {
+      const { VaultGraphSearch } = await import("./vault/search.js");
+
+      // Open shared DB and create store + search
+      const { store, db } = await getVaultStore();
+      try {
+        const search = new VaultGraphSearch(store);
+
+        let results: import("./types.js").GraphSearchResult[] = [];
+
+        if (args.mode === "neighbors" && args.nodePath) {
+          const node = store.getNodeByPath(args.nodePath);
+          if (!node) {
+            return trackResponse("ctx_vault_graph", {
+              content: [{ type: "text" as const, text: `Node not found: ${args.nodePath}` }],
+              isError: true,
+            });
+          }
+          results = search.neighbors(node.id, args.maxHops).slice(0, args.limit);
+        } else if (args.mode === "backlinks" && args.nodePath) {
+          const node = store.getNodeByPath(args.nodePath);
+          if (!node) {
+            return trackResponse("ctx_vault_graph", {
+              content: [{ type: "text" as const, text: `Node not found: ${args.nodePath}` }],
+              isError: true,
+            });
+          }
+          results = search.backlinks(node.id).slice(0, args.limit);
+        } else if (args.mode === "tag-cluster" && args.tag) {
+          results = search.tagCluster(args.tag).slice(0, args.limit);
+        } else {
+          return trackResponse("ctx_vault_graph", {
+            content: [{ type: "text" as const, text: "Invalid mode or missing required parameter" }],
+            isError: true,
+          });
+        }
+
+        return trackResponse("ctx_vault_graph", {
+          content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }],
+        });
+      } finally {
+        db.close();
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return trackResponse("ctx_vault_graph", {
+        content: [{ type: "text" as const, text: `Vault graph error: ${message}` }],
+        isError: true,
+      });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────
 // Server startup
 // ─────────────────────────────────────────────────────────
 

@@ -138,3 +138,88 @@ export const EventPriority = {
 } as const;
 
 export type EventPriorityLevel = (typeof EventPriority)[keyof typeof EventPriority];
+
+// ─────────────────────────────────────────────────────────
+// Vault graph types
+// ─────────────────────────────────────────────────────────
+
+/**
+ * A node representing an Obsidian note in the vault graph.
+ */
+export interface VaultNode {
+  id: number;
+  vault_path: string;
+  note_path: string;
+  title: string;
+  frontmatter: string | null;
+  content_hash: string;
+  file_mtime: number;
+  out_degree: number;
+  in_degree: number;
+  source_id: number | null;
+  indexed_at: string;
+}
+
+/**
+ * A directed edge between two vault nodes (e.g. wikilink).
+ */
+export interface VaultEdge {
+  id: number;
+  source_id: number;
+  target_id: number | null;
+  target_name: string;
+  alias: string | null;
+  line_number: number | null;
+  context: string | null;
+  edge_type: string;
+}
+
+/**
+ * A tag associated with a vault node.
+ */
+export interface VaultTag {
+  id: number;
+  tag: string;
+  node_id: number;
+}
+
+/**
+ * A frontmatter key-value pair on a vault node.
+ */
+export interface VaultFrontmatterKey {
+  id: number;
+  node_id: number;
+  key: string;
+  value: string;
+}
+
+/**
+ * Persisted configuration for a registered Obsidian vault.
+ */
+export interface VaultConfig {
+  vaultPath: string;
+  lastIndexedAt: string;
+  noteCount: number;
+  edgeCount: number;
+}
+
+/**
+ * Result from graph-aware search over vault nodes.
+ * Uses in_degree (not PageRank) as the authority signal in v1.
+ */
+export interface GraphSearchResult {
+  id: number;
+  title: string;
+  path: string;
+  hopDistance?: number;
+  textRank?: number;
+  fusionScore?: number;
+  pageRank?: number;
+  frontmatter?: Record<string, string>;
+  tags?: string[];
+  backlinkCount?: number;
+  snippet?: string;
+  matchLayer?: "bfs" | "backlinks" | "tag-cluster" | "rrf-graph";
+  source?: string;
+  origin?: "vault-graph";
+}
