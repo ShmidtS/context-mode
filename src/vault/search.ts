@@ -197,13 +197,15 @@ export class VaultGraphSearch {
 
   /**
    * Return all nodes that link TO nodeId (in-degree neighbors).
+   * Optional edgeType filter.
    */
-  backlinks(nodeId: number): GraphSearchResult[] {
+  backlinks(nodeId: number, edgeType?: string): GraphSearchResult[] {
     const edges = this.#store.getEdgesByTarget(nodeId);
     const results: GraphSearchResult[] = [];
     const seen = new Set<number>();
 
     for (const edge of edges) {
+      if (edgeType && edge.edge_type !== edgeType) continue;
       if (seen.has(edge.source_id)) continue;
       seen.add(edge.source_id);
 

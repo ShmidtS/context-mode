@@ -32,12 +32,16 @@ export function createRoutingBlock(t, options = {}) {
        - All follow-up questions. ONE call, many queries (default relevance mode).
     3. PROCESSING: ${t("ctx_execute")}(language, code) | ${t("ctx_execute_file")}(path, language, code)
        - API calls, log analysis, data processing.
-    4. VAULT GRAPH: ${t("ctx_vault_graph")}(mode, nodePath|tag)
+    4. VAULT GRAPH: ${t("ctx_vault_graph")}(mode, nodePath|tag, edgeType?)
        - Traverse indexed vault graph: neighbors (N-hop BFS), backlinks (reverse links), tag-cluster.
        - Use when: exploring relationships between markdown notes, code dependencies,
          or user mentions wiki-links [[...]], tags, backlinks, obsidian, vault, related files.
+       - edgeType filter: "import" for code imports, "wikilink" for notes, "external" for deps.
+         Omit for all edge types.
        - Project auto-indexes on first access — call directly. For custom vaults, index first with
          ${t("ctx_vault_index")}(vaultPath).
+       - If project has no markdown notes with wiki-links or #tags, the graph will be empty and
+         results will be empty — do not retry, use ctx_search for code-level queries instead.
   </tool_selection_hierarchy>
 
   <forbidden_actions>
@@ -92,7 +96,9 @@ ${includeCommands ? `
     → Call purge MCP tool with confirm: true. Warn: irreversible.
 
     "vault graph" | "backlinks" | "neighbors" | "tag cluster" | "obsidian" | "wiki-links" | "related notes"
-    → Call ${t("ctx_vault_graph")}(mode, nodePath|tag). Project auto-indexes on first access.
+    → Call ${t("ctx_vault_graph")}(mode, nodePath|tag, edgeType?). Project auto-indexes on first access.
+       edgeType: "import" for code dependencies, "wikilink" for note links. Omit for all.
+       If project has no markdown notes with wiki-links or #tags, the graph is empty — use ctx_search instead.
 
     After /clear or /compact: knowledge base preserved. Tell user: "context-mode knowledge base preserved. Use \`ctx purge\` to start fresh."
   </ctx_commands>

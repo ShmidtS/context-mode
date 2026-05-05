@@ -94,6 +94,7 @@ let _store: ContentStore | null = null;
 // ── Shared vault graph store (same DB as ContentStore, separate connection) ──
 let _vaultStoreCache: { store: import("./vault/graph-store.js").VaultGraphStore; search: import("./vault/search.js").VaultGraphSearch; db: any } | null = null;
 let _projectVaultIndexed = false;
+let _projectVaultEmpty = false;
 const DEBUG_VAULT = process.env.DEBUG?.includes("context-mode");
 
 // Lazy import — used by getSharedVaultStore and ctx_vault_index handler
@@ -153,6 +154,9 @@ async function getSharedVaultStore(): Promise<{
           noteCount: result.indexed + result.updated,
           edgeCount: store.getEdgeCount(),
         });
+        if (nodeIds.length === 0) {
+          _projectVaultEmpty = true;
+        }
         if (DEBUG_VAULT)
           process.stderr.write(
             `[ctx] Auto-indexed project vault: ${projectDir} (${result.indexed + result.updated} nodes, ${result.brokenLinks} broken links)\n`,
@@ -3295,12 +3299,20 @@ server.registerTool(
       tag: z.string().optional().describe("Tag to cluster around (for tag-cluster mode)"),
       maxHops: z.number().min(1).max(5).optional().default(1).describe("Max hops for neighbor traversal"),
       limit: z.number().min(1).max(100).optional().default(20).describe("Max results"),
+      edgeType: z.string().optional().describe("Filter edges by type: wikilink, embed, markdown, import, external, reference. Omit for all types."),
     }),
   },
   async (args) => {
     try {
       // Use shared vault store + cached search (auto-indexes project on first access)
       const { store, search } = await getSharedVaultStore();
+
+      if (_projectVaultEmpty) {
+        return trackResponse("ctx_vault_graph", {
+          content: [{ type: "text" as const, text: "Vault graph is empty: this project contains no markdown notes with wiki-links, tags, or backlinks. Further ctx_vault_graph calls will not yield results." }],
+          isError: true,
+        });
+      }
 
       /** Resolve node by vaultPath+nodePath when vaultPath is provided, otherwise by notePath alone. */
       const resolveNode = (nodePath: string) =>
@@ -3318,7 +3330,7 @@ server.registerTool(
             isError: true,
           });
         }
-        results = search.neighbors(node.id, args.maxHops).slice(0, args.limit);
+        results = search.neighbors(node.id, args.maxHops, args.edgeType).slice(0, args.limit);
       } else if (args.mode === "backlinks" && args.nodePath) {
         const node = resolveNode(args.nodePath);
         if (!node) {
@@ -3327,7 +3339,7 @@ server.registerTool(
             isError: true,
           });
         }
-        results = search.backlinks(node.id).slice(0, args.limit);
+        results = search.backlinks(node.id, args.edgeType).slice(0, args.limit);
       } else if (args.mode === "tag-cluster" && args.tag) {
         results = search.tagCluster(args.tag).slice(0, args.limit);
       } else {
