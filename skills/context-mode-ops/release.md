@@ -36,45 +36,22 @@ All must report PASS before proceeding.
 
 ### 1b. Grill-Me Review — MANDATORY BLOCKING GATE
 
-**Before ANY version bump, the EM MUST run a grill-me interview on all changes in this release.**
-
-This is not optional. This is not skippable. Every release gets grilled.
-
-Interview the user relentlessly about every aspect of the changes until reaching shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one-by-one. For each question, provide your recommended answer. Ask questions one at a time. If a question can be answered by exploring the codebase, explore the codebase instead of asking.
-
-**The release is BLOCKED until:**
-- [ ] All branches of the design tree are resolved
+Before ANY version bump, run a grill-me interview on all changes. Release is BLOCKED until:
+- [ ] All design tree branches resolved
 - [ ] Zero unresolved questions remain
-- [ ] User explicitly approves the grill results
-
-Only after grill-me approval: proceed to version bump.
+- [ ] User explicitly approves grill results
 
 ### 2. Version Bump — MANDATORY
 
-<version_bump_enforcement>
-You MUST run `npm version patch`. This is NOT optional. Do NOT skip this step.
-Do NOT manually edit package.json version. Do NOT create git tags manually.
-`npm version patch` does EVERYTHING — bump, sync manifests, stage, commit, tag.
-</version_bump_enforcement>
+Run `npm version patch`. Do NOT manually edit package.json or create tags.
 
 ```bash
 npm version patch
 ```
 
-This single command does ALL of the following automatically:
-1. Bumps `package.json` version (e.g., 1.0.56 → 1.0.57)
-2. Triggers `version` lifecycle hook → runs `scripts/version-sync.mjs`
-3. `version-sync.mjs` syncs version to ALL 6 manifest files:
-   - `.claude-plugin/plugin.json`
-   - `.claude-plugin/marketplace.json`
-   - `.openclaw-plugin/openclaw.plugin.json`
-   - `.openclaw-plugin/package.json`
-   - `openclaw.plugin.json`
-   - `.pi/extensions/context-mode/package.json`
-4. Stages the manifest files via `git add`
-5. Creates a git commit and `v{VERSION}` tag
+This single command: bumps version, triggers `scripts/version-sync.mjs` (syncs all 6 manifest files), stages, commits, and tags `v{VERSION}`.
 
-**Do NOT create your own commit or tag. `npm version patch` handles it.**
+Manifest files synced: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.openclaw-plugin/openclaw.plugin.json`, `.openclaw-plugin/package.json`, `openclaw.plugin.json`, `.pi/extensions/context-mode/package.json`.
 
 ### 3. Validate (NO Build Needed)
 

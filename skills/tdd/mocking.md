@@ -38,8 +38,4 @@ const api = {
 };
 ```
 
-The SDK approach means:
-- Each mock returns one specific shape
-- No conditional logic in test setup
-- Easier to see which endpoints a test exercises
-- Type safety per endpoint
+SDK approach benefits: each mock returns one shape, no conditional logic in test setup, type safety per endpoint.

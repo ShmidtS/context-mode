@@ -124,24 +124,14 @@ Any ENV var NOT in this table must go through the full verification protocol.
 
 ## Adapter Test Matrix
 
-### Full Matrix Run
-
 ```shell
 # Run ALL adapter tests
 npx vitest run tests/adapters/
 
-# Individual adapter (for targeted testing)
-npx vitest run tests/adapters/claude-code.test.ts
-npx vitest run tests/adapters/gemini-cli.test.ts
-npx vitest run tests/adapters/opencode.test.ts
-npx vitest run tests/adapters/openclaw.test.ts
-npx vitest run tests/adapters/kilo.test.ts
-npx vitest run tests/adapters/codex.test.ts
-npx vitest run tests/adapters/vscode-copilot.test.ts
-npx vitest run tests/adapters/cursor.test.ts
-npx vitest run tests/adapters/antigravity.test.ts
-npx vitest run tests/adapters/kiro.test.ts
-npx vitest run tests/adapters/zed.test.ts
+# Individual adapter
+npx vitest run tests/adapters/{adapter}.test.ts
+# adapters: claude-code, gemini-cli, opencode, openclaw, kilo, codex,
+#           vscode-copilot, cursor, antigravity, kiro, pi, zed
 
 # Detection logic
 npx vitest run tests/adapters/detect.test.ts
@@ -167,19 +157,13 @@ TOTAL: {N}/{N} passed | 0 failed
 ## Core Module Tests
 
 ```shell
-# Core tests
-npx vitest run tests/core/routing.test.ts
-npx vitest run tests/core/search.test.ts
-npx vitest run tests/core/server.test.ts
-npx vitest run tests/core/cli.test.ts
+# Core
+npx vitest run tests/core/          # routing, search, server, cli
 
-# Module tests
-npx vitest run tests/store.test.ts
-npx vitest run tests/executor.test.ts
-npx vitest run tests/security.test.ts
-npx vitest run tests/formatters.test.ts
+# Modules
+npx vitest run tests/store.test.ts tests/executor.test.ts tests/security.test.ts tests/formatters.test.ts
 
-# Hook tests
+# Hooks
 npx vitest run tests/hooks/
 
 # Full suite
@@ -193,20 +177,13 @@ npm test
 ```javascript
 // WRONG — breaks on Windows
 const configPath = homedir + "/.config/opencode/config.json";
-
 // CORRECT — works everywhere
 const configPath = path.join(homedir(), ".config", "opencode", "config.json");
 ```
 
-Grep for potential issues:
 ```shell
-# String concatenation with path separators
-rg "homedir\(\)\s*\+" src/
-rg '"/\.' src/
-rg "'\\./" src/
-
-# Direct slash usage in paths (should use path.join)
-rg 'path\s*=.*"/' src/ --type ts
+rg "homedir\(\)\s*\+" src/     # string concat with paths
+rg 'path\s*=.*"/' src/ --type ts  # direct slash in paths
 ```
 
 ### Temp Directory
@@ -214,33 +191,29 @@ rg 'path\s*=.*"/' src/ --type ts
 ```javascript
 // WRONG — hardcoded /tmp
 const tmpFile = "/tmp/context-mode-output.txt";
-
-// CORRECT — uses OS temp dir
+// CORRECT — OS temp dir
 const tmpFile = path.join(os.tmpdir(), "context-mode-output.txt");
 ```
 
-Grep for hardcoded temp:
 ```shell
-rg '"/tmp/' src/
-rg "'/tmp/" src/
+rg '"/tmp/' src/    # hardcoded temp paths
 ```
 
-### Native Bindings (better-sqlite3)
+### Native Bindings / Process Spawn
 
-Check that `better-sqlite3` is in `optionalDependencies` (not `dependencies`) and the code handles the case where it's not available:
+`better-sqlite3` MUST be in `optionalDependencies` (not `dependencies`):
 
 ```shell
 rg "better-sqlite3" src/ --type ts
 rg "optionalDependencies" package.json
 ```
 
-### Process Spawn
+Process spawn must use explicit shell selection:
 
 ```javascript
-// WRONG — shell: true behaves differently on Windows
+// WRONG
 spawn("command", { shell: true });
-
-// CORRECT — explicit shell selection
+// CORRECT
 spawn("command", { shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh" });
 ```
 
@@ -259,27 +232,19 @@ Each platform has different hook formats. Verify changes match:
 
 ## Security Checks
 
-### Sandbox Escape
-
 ```shell
-# File writing attempts through ctx_execute
+# Sandbox escape: file writing through ctx_execute
 rg "writeFile\|appendFile\|createWriteStream" src/executor.ts
 
 # Path traversal
 rg "\.\.\/" src/ --type ts
 
-# Command injection vectors
+# Command injection
 rg "exec\(.*\$\{" src/ --type ts
 rg "spawn\(.*\$\{" src/ --type ts
-```
 
-### Information Disclosure
-
-```shell
-# Sensitive paths
+# Information disclosure
 rg "process\.env\b" src/ --type ts | grep -v "test"
-
-# Home directory exposure
 rg "homedir\(\)" src/ --type ts
 ```
 

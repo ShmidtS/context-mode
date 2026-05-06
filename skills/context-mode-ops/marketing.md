@@ -94,22 +94,13 @@ Include three sections in the file:
 2. Data sources used (which files/commands provided which numbers)
 3. AI pattern audit results (what was caught and fixed)
 
-## Examples of good vs bad
+## Voice Examples
 
-Bad (AI-generated):
-"We're thrilled to announce context-mode v1.0.57, a groundbreaking update that represents a pivotal moment in the evolution of AI-powered development tools. This release showcases our commitment to innovation, performance, and developer experience."
+Bad (AI-generated): "We're thrilled to announce a groundbreaking update that represents a pivotal moment in the evolution of AI-powered development tools."
+Good (founder voice): "I have a confession. I built a tool used by 57,000+ developers and I was drowning in GitHub issues."
 
-Good (founder voice):
-"I have a confession. I built a tool used by 57,000+ developers and I was drowning in GitHub issues."
+Bad: "features a robust FTS5 search engine, a polyglot execution sandbox, and a dynamic agent orchestration layer, ensuring seamless integration"
+Good: "FTS5 search with BM25 ranking, sandbox execution in 11 languages, session state survives context window compactions"
 
-Bad:
-"The technical architecture features a robust FTS5 search engine, a polyglot execution sandbox, and a dynamic agent orchestration layer, ensuring seamless integration across platforms."
-
-Good:
-"Some numbers on the tech side: FTS5 search with BM25 ranking, sandbox execution in 11 languages, session state survives context window compactions through SQLite event tracking."
-
-Bad:
-"This innovative solution serves as a testament to the transformative potential of AI-native infrastructure."
-
-Good:
-"Solo maintainers will run engineering orgs made of agents. Not because it sounds cool on a slide, but because the alternative is burnout."
+Bad: "serves as a testament to the transformative potential"
+Good: "Not because it sounds cool on a slide, but because the alternative is burnout."

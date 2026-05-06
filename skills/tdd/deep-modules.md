@@ -8,11 +8,7 @@ From "A Philosophy of Software Design":
 ┌─────────────────────┐
 │   Small Interface   │  ← Few methods, simple params
 ├─────────────────────┤
-│                     │
-│                     │
 │  Deep Implementation│  ← Complex logic hidden
-│                     │
-│                     │
 └─────────────────────┘
 ```
 
@@ -26,8 +22,8 @@ From "A Philosophy of Software Design":
 └─────────────────────────────────┘
 ```
 
-When designing interfaces, ask:
+Design questions:
 
-- Can I reduce the number of methods?
-- Can I simplify the parameters?
-- Can I hide more complexity inside?
+- Reduce the number of methods?
+- Simplify the parameters?
+- Hide more complexity inside?
