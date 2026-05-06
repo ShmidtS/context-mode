@@ -38,7 +38,7 @@ type SearchRow = {
   highlighted: string;
 };
 
-import type { IndexResult, SearchResult, StoreStats } from "./types.js";
+import type { IndexResult, SearchResult, StoreStats, AstChunk } from "./types.js";
 export type { IndexResult, SearchResult, StoreStats } from "./types.js";
 
 // ─────────────────────────────────────────────────────────
@@ -707,6 +707,57 @@ export class ContentStore {
     }
 
     return withRetry(() => this.#insertChunks(chunks, source, content));
+  }
+
+  // ── Code symbol chunk indexing ──
+
+  /**
+   * Index AST-derived code chunks (one per symbol) into FTS5.
+   * Each AstChunk corresponds to a single code symbol extracted by tree-sitter.
+   *
+   * @param chunks     — AstChunk[] from chunkBySymbols()
+   * @param sourcePath — Relative file path used as the source label
+   * @param sourceType — Category string (e.g. 'vault-code')
+   */
+  indexCodeChunks(chunks: AstChunk[], sourcePath: string, sourceType: string): IndexResult {
+    if (chunks.length === 0) {
+      return { sourceId: 0, label: sourcePath, totalChunks: 0, codeChunks: 0 }
+    }
+
+    const label = `code:${sourcePath}`
+
+    const transaction = this.#db.transaction(() => {
+      this.#stmtDeleteChunksByLabel.run(label)
+      this.#stmtDeleteChunksTrigramByLabel.run(label)
+      this.#stmtDeleteSourcesByLabel.run(label)
+
+      const info = this.#stmtInsertSource.run(label, chunks.length, chunks.length, sourcePath, null)
+      const sourceId = Number(info.lastInsertRowid)
+
+      const now = new Date().toISOString()
+      for (const chunk of chunks) {
+        const meta = chunk.metadata
+        const contentWithMeta = `${chunk.content}\n// symbol:${meta.symbolName} kind:${meta.symbolKind}${meta.scope ? ` scope:${meta.scope}` : ''} lines:${meta.lineStart}-${meta.lineEnd}`
+        this.#stmtInsertChunk.run(chunk.title, contentWithMeta, sourceId, 'code', sourceType, null, null, now)
+        this.#stmtInsertChunkTrigram.run(chunk.title, contentWithMeta, sourceId, 'code', sourceType, null, null, now)
+      }
+
+      return sourceId
+    })
+
+    const sourceId = transaction()
+
+    this.#insertCount++
+    if (this.#insertCount % ContentStore.OPTIMIZE_EVERY === 0) {
+      this.#optimizeFTS()
+    }
+
+    return {
+      sourceId,
+      label,
+      totalChunks: chunks.length,
+      codeChunks: chunks.length,
+    }
   }
 
   // ── Shared DB Insertion ──

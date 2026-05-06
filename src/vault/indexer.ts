@@ -11,6 +11,8 @@ import { join, relative, resolve, extname } from "node:path";
 import { createHash } from "node:crypto";
 import { parseVaultNote } from "./parser.js";
 import { parseCodeFile, type ParsedCodeFile } from "./code-parser.js";
+import { canParse } from "./ast-parser.js";
+import { extractSymbolEdges } from "./symbol-graph.js";
 import { resolveLink } from "./resolver.js";
 import { normalizePath } from "./path-utils.js";
 
@@ -67,7 +69,7 @@ export interface VaultNode {
 export interface VaultEdge {
   sourcePath: string;
   targetPath: string | null; // null = broken link
-  linkType: "wikilink" | "embed" | "markdown" | "import" | "reference" | "external";
+  linkType: "wikilink" | "embed" | "markdown" | "import" | "reference" | "external" | "calls" | "inherits" | "implements" | "type-ref" | "decorates";
   alias?: string;
   targetName?: string;
   context: string;
@@ -498,6 +500,38 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
       }
     }
   }
+
+  // ── Pass 2c: insert symbol edges from AST-parsable code files ──
+  for (const item of codeToIndex) {
+    const { relPath } = item;
+
+    if (!canParse(relPath)) continue;
+
+    const absPath = join(vaultRoot, relPath);
+    let source: string;
+    try {
+      source = readFileText(absPath);
+    } catch {
+      continue;
+    }
+
+    const sourceNode = store.getNode(relPath);
+    const edges = extractSymbolEdges(source, relPath, sourceNode?.inDegree ?? 0);
+
+    for (const edge of edges) {
+      store.upsertEdge({
+        sourcePath: relPath,
+        targetPath: null,
+        linkType: edge.edgeType,
+        targetName: edge.targetSymbol,
+        context: "",
+        lineNumber: -1,
+      });
+    }
+  }
+
+  // ── Pass 3: connector indexing (stub) ──
+  // TODO: Phase 1C — call indexConnectors(vaultRoot, store) when connectors are implemented
 
   return result;
 }

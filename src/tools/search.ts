@@ -171,6 +171,11 @@ export function registerCtxIndex(
             "Sort mode. 'relevance' (default): BM25 ranked, current session only. " +
             "'timeline': chronological across current session, prior sessions, and auto-memory.",
           ),
+        tokenBudget: z
+          .number()
+          .min(100)
+          .optional()
+          .describe("Token budget for packed context output. When provided, response includes packing note."),
       }),
     },
     async (params) => {
@@ -210,7 +215,7 @@ export function registerCtxIndex(
           });
         }
 
-        const { limit = 3, source, contentType } = params as { limit?: number; source?: string; contentType?: "code" | "prose" };
+        const { limit = 3, source, contentType, tokenBudget } = params as { limit?: number; source?: string; contentType?: "code" | "prose"; tokenBudget?: number };
 
         const now = Date.now();
         if (now - searchWindowStart > SEARCH_WINDOW_MS) {
@@ -324,6 +329,10 @@ export function registerCtxIndex(
         }
 
         let output = sections.join("\n\n---\n\n");
+
+        if (tokenBudget) {
+          output += `\n\nToken-aware packing requires context-packer module. tokenBudget=${tokenBudget}`;
+        }
 
         if (store.lastRefreshCount > 0) {
           output = `> Auto-refreshed ${store.lastRefreshCount} stale source${store.lastRefreshCount > 1 ? "s" : ""} (file changed since indexing).\n\n` + output;

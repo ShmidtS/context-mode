@@ -8,6 +8,9 @@ import { registerCtxIndex } from "./search.js";
 import { registerCtxBatchExecute } from "./batch.js";
 import { registerAdminTools } from "./admin.js";
 import { registerVaultTools } from "./vault.js";
+import { registerContextStreamTools } from "./context-stream.js";
+import { registerCodeGraphTools } from "./codegraph.js";
+import { registerConnectorTools } from "./connectors.js";
 
 export function registerAllTools(
   server: import("@modelcontextprotocol/sdk/server/mcp.js").McpServer,
@@ -18,4 +21,7 @@ export function registerAllTools(
   registerCtxBatchExecute(server, executor);
   registerAdminTools(server, executor);
   registerVaultTools(server);
+  registerContextStreamTools(server);
+  registerCodeGraphTools(server);
+  registerConnectorTools(server);
 }

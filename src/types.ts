@@ -97,7 +97,7 @@ export interface SearchResult {
   source: string;
   rank: number;
   contentType: "code" | "prose";
-  matchLayer?: "porter" | "trigram" | "fuzzy" | "rrf" | "rrf-fuzzy";
+  matchLayer?: "porter" | "trigram" | "fuzzy" | "rrf" | "rrf-fuzzy" | "rrf-3way" | "semantic" | "hybrid";
   highlighted?: string;
   timestamp?: string;
 }
@@ -165,6 +165,8 @@ export interface VaultNode {
   in_degree: number;
   source_id: number | null;
   indexed_at: string;
+  source_type: string;
+  connector_meta: string | null;
 }
 
 /**
@@ -208,6 +210,56 @@ export interface VaultConfig {
   lastIndexedAt: string;
   noteCount: number;
   edgeCount: number;
+}
+
+// ─────────────────────────────────────────────────────────
+// AST symbol types (Phase 1A — ContextStream + CodeGraphContext)
+// ─────────────────────────────────────────────────────────
+
+/**
+ * A code symbol extracted by tree-sitter AST walking.
+ * Represents a named declaration: function, class, method, interface, etc.
+ */
+export interface CodeSymbol {
+  name: string
+  kind: 'function' | 'class' | 'method' | 'interface' | 'type' | 'variable' | 'constant'
+  scope?: string
+  byteStart: number
+  byteEnd: number
+  lineStart: number
+  lineEnd: number
+  contentHash: string
+}
+
+/**
+ * A chunk produced by symbol-boundary chunking.
+ * Each chunk corresponds to one CodeSymbol's source text.
+ */
+export interface AstChunk {
+  title: string
+  content: string
+  contentType: 'code'
+  metadata: {
+    symbolName: string
+    symbolKind: string
+    scope?: string
+    byteStart: number
+    byteEnd: number
+    lineStart: number
+    lineEnd: number
+    contentHash: string
+  }
+}
+
+/**
+ * Result from vector similarity search over code symbols.
+ * Placeholder for future embedding-based retrieval.
+ */
+export interface VectorSearchResult {
+  nodeId: number
+  symbolId?: number
+  similarity: number
+  score: number
 }
 
 /**

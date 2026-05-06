@@ -29,6 +29,8 @@ type NodeRow = {
   in_degree: number;
   source_id: number | null;
   indexed_at: string;
+  source_type: string;
+  connector_meta: string | null;
 };
 
 /** Row shape from vault_edges queries. */
@@ -158,19 +160,34 @@ export class VaultGraphStore {
       );
       CREATE INDEX IF NOT EXISTS idx_vault_fmk_key_value ON vault_frontmatter_keys(key, value);
     `);
+
+    // Migrate: add source_type and connector_meta columns (safe for existing DBs)
+    this.#addColumnIfMissing('vault_nodes', 'source_type', "TEXT NOT NULL DEFAULT 'vault'")
+    this.#addColumnIfMissing('vault_nodes', 'connector_meta', 'TEXT')
+  }
+
+  /** Add a column to a table if it does not already exist. O(1) in SQLite. */
+  #addColumnIfMissing(table: string, column: string, definition: string): void {
+    try {
+      this.#db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+    } catch {
+      // Column already exists — safe to ignore
+    }
   }
 
   #prepareStatements(): void {
     // Node writes
     this.#stmtUpsertNode = this.#db.prepare(`
-      INSERT INTO vault_nodes (vault_path, note_path, title, frontmatter, content_hash, file_mtime, out_degree, in_degree, source_id)
-      VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)
+      INSERT INTO vault_nodes (vault_path, note_path, title, frontmatter, content_hash, file_mtime, out_degree, in_degree, source_id, source_type, connector_meta)
+      VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
       ON CONFLICT(vault_path, note_path) DO UPDATE SET
         title = excluded.title,
         frontmatter = excluded.frontmatter,
         content_hash = excluded.content_hash,
         file_mtime = excluded.file_mtime,
         source_id = excluded.source_id,
+        source_type = excluded.source_type,
+        connector_meta = excluded.connector_meta,
         indexed_at = datetime('now')
       RETURNING id
     `);
@@ -254,9 +271,11 @@ export class VaultGraphStore {
     contentHash: string,
     fileMtime: number,
     sourceId: number | null,
+    sourceType: string = 'vault',
+    connectorMeta: string | null = null,
   ): number {
     const row = this.#stmtUpsertNode.get(
-      vaultPath, notePath, title, frontmatter, contentHash, fileMtime, sourceId
+      vaultPath, notePath, title, frontmatter, contentHash, fileMtime, sourceId, sourceType, connectorMeta
     ) as { id: number } | undefined;
     return row?.id ?? 0;
   }
@@ -298,6 +317,14 @@ export class VaultGraphStore {
     const rows = this.#db.prepare(
       `SELECT * FROM vault_nodes WHERE ${conditions}`
     ).all(...params) as NodeRow[];
+    return rows.map((r) => this.#mapNode(r));
+  }
+
+  /** Get all nodes for a specific vault path. */
+  getNodesByVaultPath(vaultPath: string): VaultNode[] {
+    const rows = this.#db.prepare(
+      "SELECT * FROM vault_nodes WHERE vault_path = ?"
+    ).all(vaultPath) as NodeRow[];
     return rows.map((r) => this.#mapNode(r));
   }
 
@@ -429,6 +456,8 @@ export class VaultGraphStore {
       in_degree: r.in_degree,
       source_id: r.source_id,
       indexed_at: r.indexed_at,
+      source_type: r.source_type,
+      connector_meta: r.connector_meta,
     };
   }
 

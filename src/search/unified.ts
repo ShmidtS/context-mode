@@ -11,6 +11,8 @@ import type { SessionDB, StoredEvent } from "../session/db.js";
 import type { VaultGraphStore } from "../vault/graph-store.js";
 import type { VaultGraphSearch } from "../vault/search.js";
 import { searchAutoMemory, type AutoMemoryAdapter } from "./auto-memory.js";
+import type { VectorStore } from "./vector-store.js";
+import type { EmbeddingProvider } from "./embedding.js";
 
 const DEBUG = process.env.DEBUG?.includes("context-mode");
 
@@ -22,12 +24,13 @@ export interface UnifiedSearchResult {
   title: string;
   content: string;
   source: string;
-  origin: "current-session" | "prior-session" | "auto-memory" | "vault-graph";
+  origin: "current-session" | "prior-session" | "auto-memory" | "vault-graph" | "semantic";
   timestamp?: string;
   rank?: number;
   matchLayer?: string;
   highlighted?: string;
   contentType?: "code" | "prose";
+  estimatedTokens?: number;
 }
 
 export interface SearchAllSourcesOpts {
@@ -46,6 +49,10 @@ export interface SearchAllSourcesOpts {
   vaultSearch?: VaultGraphSearch | null;
   /** Vault graph store — needed for timestamp lookups on vault results. */
   vaultStore?: VaultGraphStore | null;
+  /** Vector store — when present with embeddingProvider, enables semantic search. */
+  vectorStore?: VectorStore | null;
+  /** Embedding provider — when present with vectorStore, enables semantic search. */
+  embeddingProvider?: EmbeddingProvider | null;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -79,6 +86,8 @@ export async function searchAllSources(opts: SearchAllSourcesOpts): Promise<Unif
     adapter,
     vaultSearch,
     vaultStore,
+    vectorStore,
+    embeddingProvider,
   } = opts;
 
   // Capture session start time once — used as proxy for ContentStore items
@@ -186,6 +195,67 @@ export async function searchAllSources(opts: SearchAllSourcesOpts): Promise<Unif
       }
     } catch (e) {
       if (DEBUG) process.stderr.write(`[ctx] vault-graph search failed: ${e}\n`);
+    }
+  }
+
+  // ── Source 5: Semantic / vector search (both modes, when vectorStore + embeddingProvider present) ──
+  if (vectorStore && embeddingProvider && query.trim().length > 0) {
+    try {
+      const queryEmbedding = await embeddingProvider.embed(query);
+      if (queryEmbedding) {
+        const vectorResults = vectorStore.searchSimilar(
+          queryEmbedding,
+          embeddingProvider.name,
+          limit,
+          0.7,
+        );
+
+        // RRF-fuse semantic results into the existing result set.
+        // Uses the same RRF constant K=60 as ContentStore's rrfSearch.
+        const K = 60;
+
+        // Build a key-based score map from existing results for RRF merging
+        const rrfMap = new Map<string, { result: UnifiedSearchResult; score: number }>();
+        const resultKey = (r: UnifiedSearchResult) => `${r.source}::${r.title}`;
+
+        for (const [i, r] of results.entries()) {
+          const k = resultKey(r);
+          rrfMap.set(k, { result: r, score: 1 / (K + i + 1) });
+        }
+
+        // Add semantic results with RRF scoring
+        for (const [i, vr] of vectorResults.entries()) {
+          const key = `semantic::node-${vr.nodeId}`;
+          const existing = rrfMap.get(key);
+          const semScore = 1 / (K + i + 1);
+          if (existing) {
+            existing.score += semScore;
+          } else {
+            rrfMap.set(key, {
+              result: {
+                title: `Node ${vr.nodeId}`,
+                content: `Semantic match (similarity: ${vr.similarity.toFixed(3)})`,
+                source: `node-${vr.nodeId}`,
+                origin: "semantic" as const,
+                rank: vr.similarity,
+                matchLayer: "semantic",
+                estimatedTokens: Math.ceil(`Semantic match (similarity: ${vr.similarity.toFixed(3)})`.length / 4),
+              },
+              score: semScore,
+            });
+          }
+        }
+
+        // Replace results array with RRF-merged results, sorted by combined score
+        results.length = 0;
+        const merged = Array.from(rrfMap.values())
+          .sort((a, b) => b.score - a.score);
+        for (const { result } of merged) {
+          results.push(result);
+        }
+      }
+    } catch (e) {
+      if (DEBUG) process.stderr.write(`[ctx] semantic search failed: ${e}\n`);
     }
   }
 

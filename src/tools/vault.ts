@@ -138,7 +138,7 @@ export function registerVaultTools(
         vaultPath: z.string().optional().describe("Vault path (required when multiple vaults are indexed)"),
         maxHops: z.number().min(1).max(5).optional().default(1).describe("Max hops for neighbor traversal"),
         limit: z.number().min(1).max(100).optional().default(20).describe("Max results"),
-        edgeType: z.string().optional().describe("Filter edges by type: wikilink, embed, markdo…"),
+        edgeType: z.string().optional().describe("Filter edges by type: wikilink, embed, markdown, calls, inherits, implements, type-ref, decorates"),
       }),
     },
     async (args) => {
