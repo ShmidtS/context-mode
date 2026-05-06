@@ -84,6 +84,21 @@ function dedupeTokens(tokens: string[]): string[] {
   return out;
 }
 
+/**
+ * Format tokens into a quoted FTS5 query string, filtering stopwords.
+ * Falls back to unfiltered tokens if ALL are stopwords.
+ */
+function formatSearchTokens(
+  tokens: string[],
+  mode: "AND" | "OR",
+  emptyFallback: string,
+): string {
+  if (tokens.length === 0) return emptyFallback;
+  const meaningful = tokens.filter((w) => !STOPWORDS.has(w.toLowerCase()));
+  const final = meaningful.length > 0 ? meaningful : tokens;
+  return final.map((w) => `"${w}"`).join(mode === "OR" ? " OR " : " ");
+}
+
 export function sanitizeQuery(query: string, mode: "AND" | "OR" = "AND"): string {
   const words = dedupeTokens(
     query
@@ -95,16 +110,7 @@ export function sanitizeQuery(query: string, mode: "AND" | "OR" = "AND"): string
           !["AND", "OR", "NOT", "NEAR"].includes(w.toUpperCase()),
       ),
   );
-
-  if (words.length === 0) return '""';
-
-  // Filter stopwords to improve BM25 ranking — common terms like "update",
-  // "test", "fix" appear everywhere and dilute relevance scoring.
-  // Fall back to unfiltered words if ALL terms are stopwords.
-  const meaningful = words.filter((w) => !STOPWORDS.has(w.toLowerCase()));
-  const final = meaningful.length > 0 ? meaningful : words;
-
-  return final.map((w) => `"${w}"`).join(mode === "OR" ? " OR " : " ");
+  return formatSearchTokens(words, mode, '""');
 }
 
 export function sanitizeTrigramQuery(query: string, mode: "AND" | "OR" = "AND"): string {
@@ -113,12 +119,7 @@ export function sanitizeTrigramQuery(query: string, mode: "AND" | "OR" = "AND"):
   const words = dedupeTokens(
     cleaned.split(/\s+/).filter((w) => w.length >= 3),
   );
-  if (words.length === 0) return "";
-
-  const meaningful = words.filter((w) => !STOPWORDS.has(w.toLowerCase()));
-  const final = meaningful.length > 0 ? meaningful : words;
-
-  return final.map((w) => `"${w}"`).join(mode === "OR" ? " OR " : " ");
+  return formatSearchTokens(words, mode, "");
 }
 
 function levenshtein(a: string, b: string): number {
@@ -326,6 +327,24 @@ function findMinSpan(positionLists: number[][]): number {
   }
 
   return minSpan;
+}
+
+/**
+ * Build an FTS5 search SQL query for the given table, source filter, and
+ * optional content-type filter. Eliminates ~180 lines of duplicated SQL.
+ */
+function buildSearchSQL(
+  table: string,
+  sourceFilter: "none" | "like" | "exact",
+  contentTypeFilter: boolean,
+): string {
+  const cols = `${table}.title, ${table}.content, ${table}.content_type, ${table}.timestamp, sources.label, bm25(${table}, 5.0, 1.0) AS rank, highlight(${table}, 1, char(2), char(3)) AS highlighted`;
+  const from = `FROM ${table} JOIN sources ON sources.id = ${table}.source_id`;
+  const conditions: string[] = [`${table} MATCH ?`];
+  if (sourceFilter === "like") conditions.push("sources.label LIKE ?");
+  if (sourceFilter === "exact") conditions.push("sources.label = ?");
+  if (contentTypeFilter) conditions.push(`${table}.content_type = ?`);
+  return `SELECT ${cols} ${from} WHERE ${conditions.join(" AND ")} ORDER BY rank LIMIT ?`;
 }
 
 export class ContentStore {
@@ -554,189 +573,19 @@ export class ContentStore {
       "DELETE FROM sources WHERE label = ?",
     );
 
-    // Search path (hot)
-    this.#stmtSearchPorter = this.#db.prepare(`
-      SELECT
-        chunks.title,
-        chunks.content,
-        chunks.content_type,
-        chunks.timestamp,
-        sources.label,
-        bm25(chunks, 5.0, 1.0) AS rank,
-        highlight(chunks, 1, char(2), char(3)) AS highlighted
-      FROM chunks
-      JOIN sources ON sources.id = chunks.source_id
-      WHERE chunks MATCH ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-    this.#stmtSearchPorterFiltered = this.#db.prepare(`
-      SELECT
-        chunks.title,
-        chunks.content,
-        chunks.content_type,
-        chunks.timestamp,
-        sources.label,
-        bm25(chunks, 5.0, 1.0) AS rank,
-        highlight(chunks, 1, char(2), char(3)) AS highlighted
-      FROM chunks
-      JOIN sources ON sources.id = chunks.source_id
-      WHERE chunks MATCH ? AND sources.label LIKE ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-    this.#stmtSearchPorterExact = this.#db.prepare(`
-      SELECT
-        chunks.title,
-        chunks.content,
-        chunks.content_type,
-        chunks.timestamp,
-        sources.label,
-        bm25(chunks, 5.0, 1.0) AS rank,
-        highlight(chunks, 1, char(2), char(3)) AS highlighted
-      FROM chunks
-      JOIN sources ON sources.id = chunks.source_id
-      WHERE chunks MATCH ? AND sources.label = ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-    this.#stmtSearchTrigram = this.#db.prepare(`
-      SELECT
-        chunks_trigram.title,
-        chunks_trigram.content,
-        chunks_trigram.content_type,
-        chunks_trigram.timestamp,
-        sources.label,
-        bm25(chunks_trigram, 5.0, 1.0) AS rank,
-        highlight(chunks_trigram, 1, char(2), char(3)) AS highlighted
-      FROM chunks_trigram
-      JOIN sources ON sources.id = chunks_trigram.source_id
-      WHERE chunks_trigram MATCH ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-    this.#stmtSearchTrigramFiltered = this.#db.prepare(`
-      SELECT
-        chunks_trigram.title,
-        chunks_trigram.content,
-        chunks_trigram.content_type,
-        chunks_trigram.timestamp,
-        sources.label,
-        bm25(chunks_trigram, 5.0, 1.0) AS rank,
-        highlight(chunks_trigram, 1, char(2), char(3)) AS highlighted
-      FROM chunks_trigram
-      JOIN sources ON sources.id = chunks_trigram.source_id
-      WHERE chunks_trigram MATCH ? AND sources.label LIKE ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-    this.#stmtSearchTrigramExact = this.#db.prepare(`
-      SELECT
-        chunks_trigram.title,
-        chunks_trigram.content,
-        chunks_trigram.content_type,
-        chunks_trigram.timestamp,
-        sources.label,
-        bm25(chunks_trigram, 5.0, 1.0) AS rank,
-        highlight(chunks_trigram, 1, char(2), char(3)) AS highlighted
-      FROM chunks_trigram
-      JOIN sources ON sources.id = chunks_trigram.source_id
-      WHERE chunks_trigram MATCH ? AND sources.label = ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-
-    // Content-type filtered variants
-    this.#stmtSearchPorterContentType = this.#db.prepare(`
-      SELECT
-        chunks.title,
-        chunks.content,
-        chunks.content_type,
-        chunks.timestamp,
-        sources.label,
-        bm25(chunks, 5.0, 1.0) AS rank,
-        highlight(chunks, 1, char(2), char(3)) AS highlighted
-      FROM chunks
-      JOIN sources ON sources.id = chunks.source_id
-      WHERE chunks MATCH ? AND chunks.content_type = ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-    this.#stmtSearchPorterFilteredContentType = this.#db.prepare(`
-      SELECT
-        chunks.title,
-        chunks.content,
-        chunks.content_type,
-        chunks.timestamp,
-        sources.label,
-        bm25(chunks, 5.0, 1.0) AS rank,
-        highlight(chunks, 1, char(2), char(3)) AS highlighted
-      FROM chunks
-      JOIN sources ON sources.id = chunks.source_id
-      WHERE chunks MATCH ? AND sources.label LIKE ? AND chunks.content_type = ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-    this.#stmtSearchPorterExactContentType = this.#db.prepare(`
-      SELECT
-        chunks.title,
-        chunks.content,
-        chunks.content_type,
-        chunks.timestamp,
-        sources.label,
-        bm25(chunks, 5.0, 1.0) AS rank,
-        highlight(chunks, 1, char(2), char(3)) AS highlighted
-      FROM chunks
-      JOIN sources ON sources.id = chunks.source_id
-      WHERE chunks MATCH ? AND sources.label = ? AND chunks.content_type = ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-    this.#stmtSearchTrigramContentType = this.#db.prepare(`
-      SELECT
-        chunks_trigram.title,
-        chunks_trigram.content,
-        chunks_trigram.content_type,
-        chunks_trigram.timestamp,
-        sources.label,
-        bm25(chunks_trigram, 5.0, 1.0) AS rank,
-        highlight(chunks_trigram, 1, char(2), char(3)) AS highlighted
-      FROM chunks_trigram
-      JOIN sources ON sources.id = chunks_trigram.source_id
-      WHERE chunks_trigram MATCH ? AND chunks_trigram.content_type = ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-    this.#stmtSearchTrigramFilteredContentType = this.#db.prepare(`
-      SELECT
-        chunks_trigram.title,
-        chunks_trigram.content,
-        chunks_trigram.content_type,
-        chunks_trigram.timestamp,
-        sources.label,
-        bm25(chunks_trigram, 5.0, 1.0) AS rank,
-        highlight(chunks_trigram, 1, char(2), char(3)) AS highlighted
-      FROM chunks_trigram
-      JOIN sources ON sources.id = chunks_trigram.source_id
-      WHERE chunks_trigram MATCH ? AND sources.label LIKE ? AND chunks_trigram.content_type = ?
-      ORDER BY rank
-      LIMIT ?
-    `);
-    this.#stmtSearchTrigramExactContentType = this.#db.prepare(`
-      SELECT
-        chunks_trigram.title,
-        chunks_trigram.content,
-        chunks_trigram.content_type,
-        chunks_trigram.timestamp,
-        sources.label,
-        bm25(chunks_trigram, 5.0, 1.0) AS rank,
-        highlight(chunks_trigram, 1, char(2), char(3)) AS highlighted
-      FROM chunks_trigram
-      JOIN sources ON sources.id = chunks_trigram.source_id
-      WHERE chunks_trigram MATCH ? AND sources.label = ? AND chunks_trigram.content_type = ?
-      ORDER BY rank
-      LIMIT ?
-    `);
+    // Search path (hot) — 12 variants generated from buildSearchSQL
+    this.#stmtSearchPorter = this.#db.prepare(buildSearchSQL("chunks", "none", false));
+    this.#stmtSearchPorterFiltered = this.#db.prepare(buildSearchSQL("chunks", "like", false));
+    this.#stmtSearchPorterExact = this.#db.prepare(buildSearchSQL("chunks", "exact", false));
+    this.#stmtSearchTrigram = this.#db.prepare(buildSearchSQL("chunks_trigram", "none", false));
+    this.#stmtSearchTrigramFiltered = this.#db.prepare(buildSearchSQL("chunks_trigram", "like", false));
+    this.#stmtSearchTrigramExact = this.#db.prepare(buildSearchSQL("chunks_trigram", "exact", false));
+    this.#stmtSearchPorterContentType = this.#db.prepare(buildSearchSQL("chunks", "none", true));
+    this.#stmtSearchPorterFilteredContentType = this.#db.prepare(buildSearchSQL("chunks", "like", true));
+    this.#stmtSearchPorterExactContentType = this.#db.prepare(buildSearchSQL("chunks", "exact", true));
+    this.#stmtSearchTrigramContentType = this.#db.prepare(buildSearchSQL("chunks_trigram", "none", true));
+    this.#stmtSearchTrigramFilteredContentType = this.#db.prepare(buildSearchSQL("chunks_trigram", "like", true));
+    this.#stmtSearchTrigramExactContentType = this.#db.prepare(buildSearchSQL("chunks_trigram", "exact", true));
 
     // Fuzzy path
     this.#stmtFuzzyVocab = this.#db.prepare(

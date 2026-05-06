@@ -288,46 +288,51 @@ async function fetchLatestVersion(): Promise<string> {
  * Doctor — adapter-aware diagnostics
  * ------------------------------------------------------- */
 
-async function doctor(): Promise<number> {
+async function doctorDetectAndIntro(): Promise<{
+  adapter: HookAdapter;
+  detection: ReturnType<typeof detectPlatform>;
+}> {
   if (process.stdout.isTTY) console.clear();
-
-  // Detect platform
   const detection = detectPlatform();
   const adapter = await getAdapter(detection.platform);
-
   p.intro(color.bgMagenta(color.white(" context-mode doctor ")));
   p.log.info(
     `Platform: ${color.cyan(adapter.name)}` +
       color.dim(` (${detection.confidence} confidence — ${detection.reason})`),
   );
+  return { adapter, detection };
+}
 
-  let criticalFails = 0;
-
+async function doctorGetRuntimes(): Promise<{
+  runtimes: ReturnType<typeof detectRuntimes>;
+  available: string[];
+  partial: boolean;
+}> {
   const s = p.spinner();
   s.start("Running diagnostics");
-
-  let runtimes: ReturnType<typeof detectRuntimes>;
-  let available: string[];
   try {
-    runtimes = detectRuntimes();
-    available = getAvailableLanguages(runtimes);
+    const runtimes = detectRuntimes();
+    const available = getAvailableLanguages(runtimes);
+    s.stop("Diagnostics complete");
+    return { runtimes, available, partial: false };
   } catch {
     s.stop("Diagnostics partial");
-    p.log.warn(color.yellow("Could not detect runtimes") + color.dim(" — module may be missing, restart session after upgrade"));
+    p.log.warn(
+      color.yellow("Could not detect runtimes") +
+        color.dim(" — module may be missing, restart session after upgrade"),
+    );
     p.outro(color.yellow("Doctor could not fully run — try again after restarting"));
-    return 1;
+    return { runtimes: undefined as unknown as ReturnType<typeof detectRuntimes>, available: [], partial: true };
   }
+}
 
-  s.stop("Diagnostics complete");
-
-  // Runtime check
+function doctorReportRuntimesAndSpeed(
+  runtimes: ReturnType<typeof detectRuntimes>,
+): void {
   p.note(getRuntimeSummary(runtimes), "Runtimes");
-
-  // Speed tier
   if (hasBunRuntime()) {
     p.log.success(
-      color.green("Performance: FAST") +
-        " — Bun detected for JS/TS execution",
+      color.green("Performance: FAST") + " — Bun detected for JS/TS execution",
     );
   } else {
     p.log.warn(
@@ -335,25 +340,29 @@ async function doctor(): Promise<number> {
         " — Using Node.js (install Bun for 3-5x speed boost)",
     );
   }
+}
 
-  // Language coverage
+function doctorCheckLanguageCoverage(available: string[]): number {
   const total = 11;
   const pct = ((available.length / total) * 100).toFixed(0);
   if (available.length < 2) {
-    criticalFails++;
     p.log.error(
       color.red(`Language coverage: ${available.length}/${total} (${pct}%)`) +
         " — too few runtimes detected" +
         color.dim(` — ${available.join(", ") || "none"}`),
     );
-  } else {
-    p.log.info(
-      `Language coverage: ${available.length}/${total} (${pct}%)` +
-        color.dim(` — ${available.join(", ")}`),
-    );
+    return 1;
   }
+  p.log.info(
+    `Language coverage: ${available.length}/${total} (${pct}%)` +
+      color.dim(` — ${available.join(", ")}`),
+  );
+  return 0;
+}
 
-  // Server test
+async function doctorTestServer(
+  runtimes: ReturnType<typeof detectRuntimes>,
+): Promise<number> {
   p.log.step("Testing server initialization...");
   try {
     const { PolyglotExecutor } = await import("./executor.js");
@@ -365,31 +374,40 @@ async function doctor(): Promise<number> {
     });
     if (result.exitCode === 0 && result.stdout.trim() === "ok") {
       p.log.success(color.green("Server test: PASS"));
-    } else {
-      criticalFails++;
-      const detail = result.stderr?.trim() ? ` (${result.stderr.trim().slice(0, 200)})` : "";
-      p.log.error(
-        color.red("Server test: FAIL") + ` — exit ${result.exitCode}${detail}`,
-      );
+      return 0;
     }
+    const detail = result.stderr?.trim()
+      ? ` (${result.stderr.trim().slice(0, 200)})`
+      : "";
+    p.log.error(
+      color.red("Server test: FAIL") + ` — exit ${result.exitCode}${detail}`,
+    );
+    return 1;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("Cannot find module") || message.includes("MODULE_NOT_FOUND")) {
-      p.log.warn(color.yellow("Server test: SKIP") + color.dim(" — module not available (restart session after upgrade)"));
-    } else {
-      criticalFails++;
-      p.log.error(color.red("Server test: FAIL") + ` — ${message}`);
+    if (
+      message.includes("Cannot find module") ||
+      message.includes("MODULE_NOT_FOUND")
+    ) {
+      p.log.warn(
+        color.yellow("Server test: SKIP") +
+          color.dim(" — module not available (restart session after upgrade)"),
+      );
+      return 0;
     }
+    p.log.error(color.red("Server test: FAIL") + ` — ${message}`);
+    return 1;
   }
+}
 
-  // Hooks — adapter-aware validation
+function doctorCheckHooks(adapter: HookAdapter, pluginRoot: string): void {
   p.log.step(`Checking ${adapter.name} hooks configuration...`);
-  const pluginRoot = getPluginRoot();
   const hookResults = adapter.validateHooks(pluginRoot);
-
   for (const result of hookResults) {
     if (result.status === "pass") {
-      p.log.success(color.green(`${result.check}: PASS`) + ` — ${result.message}`);
+      p.log.success(
+        color.green(`${result.check}: PASS`) + ` — ${result.message}`,
+      );
     } else {
       p.log.error(
         color.red(`${result.check}: FAIL`) +
@@ -398,83 +416,100 @@ async function doctor(): Promise<number> {
       );
     }
   }
+}
 
-  // Hook script exists
+function doctorCheckHookScript(pluginRoot: string): void {
   p.log.step("Checking hook script...");
   const hookScriptPath = resolve(pluginRoot, "hooks", "pretooluse.mjs");
   try {
     accessSync(hookScriptPath, constants.R_OK);
-    p.log.success(color.green("Hook script exists: PASS") + color.dim(` — ${hookScriptPath}`));
+    p.log.success(
+      color.green("Hook script exists: PASS") +
+        color.dim(` — ${hookScriptPath}`),
+    );
   } catch {
     p.log.error(
       color.red("Hook script exists: FAIL") +
         color.dim(` — not found at ${hookScriptPath}`),
     );
   }
+}
 
-  // Plugin registration — adapter-aware
+function doctorCheckPluginRegistration(adapter: HookAdapter): void {
   p.log.step(`Checking ${adapter.name} plugin registration...`);
   const pluginCheck = adapter.checkPluginRegistration();
   if (pluginCheck.status === "pass") {
-    p.log.success(color.green("Plugin enabled: PASS") + color.dim(` — ${pluginCheck.message}`));
+    p.log.success(
+      color.green("Plugin enabled: PASS") +
+        color.dim(` — ${pluginCheck.message}`),
+    );
   } else {
     p.log.warn(
-      color.yellow("Plugin enabled: WARN") +
-        ` — ${pluginCheck.message}`,
+      color.yellow("Plugin enabled: WARN") + ` — ${pluginCheck.message}`,
     );
   }
+}
 
-  // FTS5 / SQLite
+async function doctorCheckFTS5(): Promise<number> {
   p.log.step("Checking FTS5 / SQLite...");
   try {
     const Database = (await import("./db-base.js")).loadDatabase();
     const db = new Database(":memory:");
     db.exec("CREATE VIRTUAL TABLE fts_test USING fts5(content)");
     db.exec("INSERT INTO fts_test(content) VALUES ('hello world')");
-    const row = db.prepare("SELECT * FROM fts_test WHERE fts_test MATCH 'hello'").get() as { content: string } | undefined;
+    const row = db
+      .prepare("SELECT * FROM fts_test WHERE fts_test MATCH 'hello'")
+      .get() as { content: string } | undefined;
     db.close();
     if (row && row.content === "hello world") {
-      p.log.success(color.green("FTS5 / SQLite: PASS") + " — native module works");
-    } else {
-      criticalFails++;
-      p.log.error(color.red("FTS5 / SQLite: FAIL") + " — query returned unexpected result");
+      p.log.success(
+        color.green("FTS5 / SQLite: PASS") + " — native module works",
+      );
+      return 0;
     }
+    p.log.error(
+      color.red("FTS5 / SQLite: FAIL") + " — query returned unexpected result",
+    );
+    return 1;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("Cannot find module") || message.includes("MODULE_NOT_FOUND")) {
-      p.log.warn(color.yellow("FTS5 / better-sqlite3: SKIP") + color.dim(" — module not available (restart session after upgrade)"));
-    } else {
-      criticalFails++;
-      // Detect better-sqlite3 native bindings-missing pattern (issue #408).
-      // The `bindings` package throws "Could not locate the bindings file"
-      // when better_sqlite3.node failed to install — typical on Windows
-      // when prebuild-install was not on PATH so install fell through to
-      // node-gyp without an MSVC toolchain.
-      const isBindingsMissing =
-        /Could not locate the bindings file/i.test(message) ||
-        /bindings\.node/i.test(message) ||
-        /\bbindings\b/i.test(message);
-      if (isBindingsMissing && process.platform === "win32") {
-        p.log.error(
-          color.red("FTS5 / better-sqlite3: FAIL") +
-            ` — ${message}` +
-            color.dim(
-              "\n  Root cause: prebuild-install was likely not on PATH, so install fell through to node-gyp without an MSVC toolchain (Windows)." +
-              "\n  Try (primary): npm install better-sqlite3   # re-resolves the dep tree and re-links the prebuild-install bin shim to fetch a prebuilt binary" +
-              "\n  Try (fallback): npm rebuild better-sqlite3",
-            ),
-        );
-      } else {
-        p.log.error(
-          color.red("FTS5 / better-sqlite3: FAIL") +
-            ` — ${message}` +
-            color.dim("\n  Try: npm rebuild better-sqlite3"),
-        );
-      }
+    if (
+      message.includes("Cannot find module") ||
+      message.includes("MODULE_NOT_FOUND")
+    ) {
+      p.log.warn(
+        color.yellow("FTS5 / better-sqlite3: SKIP") +
+          color.dim(" — module not available (restart session after upgrade)"),
+      );
+      return 0;
     }
+    // Detect better-sqlite3 native bindings-missing pattern (issue #408).
+    const isBindingsMissing =
+      /Could not locate the bindings file/i.test(message) ||
+      /bindings\.node/i.test(message) ||
+      /\bbindings\b/i.test(message);
+    if (isBindingsMissing && process.platform === "win32") {
+      p.log.error(
+        color.red("FTS5 / better-sqlite3: FAIL") +
+          ` — ${message}` +
+          color.dim(
+            "\n  Root cause: prebuild-install was likely not on PATH, so install fell through to node-gyp without an MSVC toolchain (Windows)." +
+            "\n  Try (primary): npm install better-sqlite3   # re-resolves the dep tree and re-links the prebuild-install bin shim to fetch a prebuilt binary" +
+            "\n  Try (fallback): npm rebuild better-sqlite3",
+          ),
+      );
+    } else {
+      p.log.error(
+        color.red("FTS5 / better-sqlite3: FAIL") +
+          ` — ${message}` +
+          color.dim("\n  Try: npm rebuild better-sqlite3"),
+      );
+    }
+    return 1;
   }
+}
 
-  // Version check — adapter-aware
+async function doctorCheckVersions(adapter: HookAdapter): Promise<void> {
   p.log.step("Checking versions...");
   const localVersion = getLocalVersion();
   const latestVersion = await fetchLatestVersion();
@@ -487,8 +522,7 @@ async function doctor(): Promise<number> {
     );
   } else if (localVersion === latestVersion) {
     p.log.success(
-      color.green("npm (MCP): PASS") +
-        ` — v${localVersion}`,
+      color.green("npm (MCP): PASS") + ` — v${localVersion}`,
     );
   } else {
     p.log.warn(
@@ -505,8 +539,7 @@ async function doctor(): Promise<number> {
     );
   } else if (latestVersion !== "unknown" && installedVersion === latestVersion) {
     p.log.success(
-      color.green(`${adapter.name}: PASS`) +
-        ` — v${installedVersion}`,
+      color.green(`${adapter.name}: PASS`) + ` — v${installedVersion}`,
     );
   } else if (latestVersion !== "unknown") {
     p.log.warn(
@@ -520,15 +553,15 @@ async function doctor(): Promise<number> {
         color.dim(" — could not verify against npm registry"),
     );
   }
+}
 
-  // Summary
+function doctorSummary(available: string[], criticalFails: number): number {
   if (criticalFails > 0) {
     p.outro(
       color.red(`Diagnostics failed — ${criticalFails} critical issue(s) found`),
     );
     return 1;
   }
-
   p.outro(
     available.length >= 4
       ? color.green("Diagnostics complete!")
@@ -537,63 +570,81 @@ async function doctor(): Promise<number> {
   return 0;
 }
 
+async function doctor(): Promise<number> {
+  const { adapter } = await doctorDetectAndIntro();
+  const { runtimes, available, partial } = await doctorGetRuntimes();
+  if (partial) return 1;
+
+  doctorReportRuntimesAndSpeed(runtimes);
+
+  let criticalFails = 0;
+  criticalFails += doctorCheckLanguageCoverage(available);
+  criticalFails += await doctorTestServer(runtimes);
+  doctorCheckHooks(adapter, getPluginRoot());
+  doctorCheckHookScript(getPluginRoot());
+  doctorCheckPluginRegistration(adapter);
+  criticalFails += await doctorCheckFTS5();
+  await doctorCheckVersions(adapter);
+
+  return doctorSummary(available, criticalFails);
+}
+
 /* -------------------------------------------------------
  * Insight — analytics dashboard
  * ------------------------------------------------------- */
 
-async function insight(port: number) {
-  try {
-  const { execSync, spawn } = await import("node:child_process");
-  const { statSync, mkdirSync, cpSync } = await import("node:fs");
-
-  const insightSource = resolve(getPluginRoot(), "insight");
-  // Detect platform + adapter for correct session/content paths
-  const detection = detectPlatform();
-  const adapter = await getAdapter(detection.platform);
-  const sessDir = adapter.getSessionDir();
-  const contentDir = join(dirname(sessDir), "content");
-  const cacheDir = join(dirname(sessDir), "insight-cache");
-
-  if (!existsSync(join(insightSource, "server.mjs"))) {
-    console.error("Error: Insight source not found. Try upgrading context-mode.");
-    process.exit(1);
-  }
-
-  mkdirSync(cacheDir, { recursive: true });
-
-  // Copy source if newer
+async function insightPrepareCache(
+  insightSource: string,
+  cacheDir: string,
+): Promise<void> {
+  const { statSync } = await import("node:fs");
   const srcMtime = statSync(join(insightSource, "server.mjs")).mtimeMs;
   const cacheMtime = existsSync(join(cacheDir, "server.mjs"))
-    ? statSync(join(cacheDir, "server.mjs")).mtimeMs : 0;
+    ? statSync(join(cacheDir, "server.mjs")).mtimeMs
+    : 0;
   if (srcMtime > cacheMtime) {
     console.log("Copying Insight source...");
     cpSync(insightSource, cacheDir, { recursive: true, force: true });
   }
 
-  // Install deps
   if (!existsSync(join(cacheDir, "node_modules"))) {
     console.log("Installing dependencies (first run)...");
     try {
-      npmExec("npm install --production=false", { cwd: cacheDir, stdio: "inherit", timeout: 300000 });
+      npmExec("npm install --production=false", {
+        cwd: cacheDir,
+        stdio: "inherit",
+        timeout: 300000,
+      });
     } catch {
-      // Clean up partial install so next run retries fresh
-      try { rmSync(join(cacheDir, "node_modules"), { recursive: true, force: true }); } catch {}
+      try {
+        rmSync(join(cacheDir, "node_modules"), { recursive: true, force: true });
+      } catch {}
       throw new Error("npm install failed — please retry");
     }
-    // Sentinel check: verify install completed (cold cache can timeout leaving partial node_modules)
-    if (!existsSync(join(cacheDir, "node_modules", "vite")) || !existsSync(join(cacheDir, "node_modules", "better-sqlite3"))) {
+    if (
+      !existsSync(join(cacheDir, "node_modules", "vite")) ||
+      !existsSync(join(cacheDir, "node_modules", "better-sqlite3"))
+    ) {
       rmSync(join(cacheDir, "node_modules"), { recursive: true, force: true });
       throw new Error("npm install incomplete — please retry");
     }
   }
+}
 
-  // Build
+async function insightBuildDashboard(cacheDir: string): Promise<void> {
+  const { execSync } = await import("node:child_process");
   console.log("Building dashboard...");
   execSync("npx vite build", { cwd: cacheDir, stdio: "pipe", timeout: 60000 });
+}
 
-  // Start server
+async function insightStartServer(
+  cacheDir: string,
+  port: number,
+  contentDir: string,
+  sessDir: string,
+): Promise<{ url: string; child: ReturnType<typeof import("node:child_process").spawn> }> {
+  const { spawn } = await import("node:child_process");
   const url = `http://localhost:${port}`;
-  console.log(`\n  context-mode Insight\n  ${url}\n`);
 
   const child = spawn("node", [join(cacheDir, "server.mjs")], {
     cwd: cacheDir,
@@ -605,37 +656,81 @@ async function insight(port: number) {
     },
     stdio: "inherit",
   });
-  child.on("error", () => {}); // prevent unhandled error crash
+  child.on("error", () => {});
 
-  // Wait for server to be ready, then verify it started
-  await new Promise(r => setTimeout(r, 1500));
+  await new Promise((r) => setTimeout(r, 1500));
 
   try {
     const { request } = await import("node:http");
     await new Promise<void>((resolve, reject) => {
-      const req = request(`http://127.0.0.1:${port}/api/overview`, { timeout: 3000 }, (res) => {
-        resolve();
-        res.resume();
-      });
+      const req = request(
+        `http://127.0.0.1:${port}/api/overview`,
+        { timeout: 3000 },
+        (res) => {
+          resolve();
+          res.resume();
+        },
+      );
       req.on("error", reject);
-      req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+      req.on("timeout", () => {
+        req.destroy();
+        reject(new Error("timeout"));
+      });
       req.end();
     });
   } catch {
-    console.error(`\nError: Port ${port} appears to be in use. Either a previous dashboard is still running, or another service is using this port.`);
+    console.error(
+      `\nError: Port ${port} appears to be in use. Either a previous dashboard is still running, or another service is using this port.`,
+    );
     console.error(`\nTo fix:`);
-    console.error(`  Kill the existing process: ${process.platform === "win32" ? `netstat -ano | findstr :${port}` : `lsof -ti:${port} | xargs kill`}`);
+    console.error(
+      `  Kill the existing process: ${process.platform === "win32" ? `netstat -ano | findstr :${port}` : `lsof -ti:${port} | xargs kill`}`,
+    );
     console.error(`  Or use a different port:   context-mode insight ${port + 1}`);
     child.kill();
     process.exit(1);
   }
 
-  // Open browser — execFile with arg array, no shell interpolation.
-  openInBrowser(url);
+  return { url, child };
+}
 
-  // Keep alive until Ctrl+C
-  process.on("SIGINT", () => { child.kill(); process.exit(0); });
-  process.on("SIGTERM", () => { child.kill(); process.exit(0); });
+async function insight(port: number) {
+  try {
+    const insightSource = resolve(getPluginRoot(), "insight");
+    if (!existsSync(join(insightSource, "server.mjs"))) {
+      console.error(
+        "Error: Insight source not found. Try upgrading context-mode.",
+      );
+      process.exit(1);
+    }
+
+    const detection = detectPlatform();
+    const adapter = await getAdapter(detection.platform);
+    const sessDir = adapter.getSessionDir();
+    const contentDir = join(dirname(sessDir), "content");
+    const cacheDir = join(dirname(sessDir), "insight-cache");
+
+    mkdirSync(cacheDir, { recursive: true });
+    await insightPrepareCache(insightSource, cacheDir);
+    await insightBuildDashboard(cacheDir);
+
+    const { url, child } = await insightStartServer(
+      cacheDir,
+      port,
+      contentDir,
+      sessDir,
+    );
+    console.log(`\n  context-mode Insight\n  ${url}\n`);
+    openInBrowser(url);
+
+    process.on("SIGINT", () => {
+      child.kill();
+      process.exit(0);
+    });
+    process.on("SIGTERM", () => {
+      child.kill();
+      process.exit(0);
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`\nInsight error: ${msg}`);
@@ -647,66 +742,70 @@ async function insight(port: number) {
  * Upgrade — adapter-aware hook configuration
  * ------------------------------------------------------- */
 
-async function upgrade() {
-  if (process.stdout.isTTY) console.clear();
-
-  // Detect platform
-  const detection = detectPlatform();
-  const adapter = await getAdapter(detection.platform);
-
-  p.intro(color.bgCyan(color.black(" context-mode upgrade ")));
-  p.log.info(
-    `Platform: ${color.cyan(adapter.name)}` +
-      color.dim(` (${detection.confidence} confidence)`),
+async function upgradeSyncMarketplace(
+  s: ReturnType<typeof p.spinner>,
+  changes: string[],
+): Promise<void> {
+  const marketplaceDir = resolve(
+    homedir(),
+    ".claude",
+    "plugins",
+    "marketplaces",
+    "context-mode",
   );
+  if (!existsSync(join(marketplaceDir, ".git"))) return;
 
-  let pluginRoot = getPluginRoot();
-  const changes: string[] = [];
-  const s = p.spinner();
-
-  // Step 0: Sync the marketplace clone (#418).
-  // Claude Code reads plugin metadata from ~/.claude/plugins/marketplaces/context-mode/.
-  // Without a git pull there, the marketplace stays pinned at the install-time
-  // commit and CC keeps reporting the old version even after our cache dir is
-  // updated — users then see "ctx-upgrade succeeded" but nothing actually
-  // changed at the plugin-system level.
-  const marketplaceDir = resolve(homedir(), ".claude", "plugins", "marketplaces", "context-mode");
-  if (existsSync(join(marketplaceDir, ".git"))) {
-    s.start("Syncing marketplace clone");
-    try {
-      // Preserve user dev edits (Mert-class users symlink the clone to a worktree).
-      const statusOut = execFileSync(
-        "git", ["-C", marketplaceDir, "status", "--porcelain"],
-        { stdio: "pipe", encoding: "utf-8", timeout: 5000 },
+  s.start("Syncing marketplace clone");
+  try {
+    const statusOut = execFileSync(
+      "git",
+      ["-C", marketplaceDir, "status", "--porcelain"],
+      { stdio: "pipe", encoding: "utf-8", timeout: 5000 },
+    );
+    if (statusOut.trim()) {
+      s.stop(
+        color.yellow("Marketplace clone has local edits — skipping git pull"),
       );
-      if (statusOut.trim()) {
-        s.stop(color.yellow("Marketplace clone has local edits — skipping git pull"));
-        p.log.info(
-          color.dim(`  Run manually: git -C "${marketplaceDir}" stash && git pull --ff-only`),
-        );
-      } else {
-        execFileSync(
-          "git", ["-C", marketplaceDir, "fetch", "--tags", "origin"],
-          { stdio: "pipe", timeout: 30000 },
-        );
-        execFileSync(
-          "git", ["-C", marketplaceDir, "reset", "--hard", "origin/HEAD"],
-          { stdio: "pipe", timeout: 10000 },
-        );
-        s.stop(color.green("Marketplace clone synced"));
-        changes.push("Marketplace clone updated to upstream");
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      s.stop(color.yellow("Marketplace sync skipped"));
-      p.log.warn(color.yellow("git refresh on marketplace failed") + ` — ${message}`);
-      p.log.info(color.dim("  Continuing — cache dir update will still happen."));
+      p.log.info(
+        color.dim(
+          `  Run manually: git -C "${marketplaceDir}" stash && git pull --ff-only`,
+        ),
+      );
+    } else {
+      execFileSync(
+        "git",
+        ["-C", marketplaceDir, "fetch", "--tags", "origin"],
+        { stdio: "pipe", timeout: 30000 },
+      );
+      execFileSync(
+        "git",
+        ["-C", marketplaceDir, "reset", "--hard", "origin/HEAD"],
+        { stdio: "pipe", timeout: 10000 },
+      );
+      s.stop(color.green("Marketplace clone synced"));
+      changes.push("Marketplace clone updated to upstream");
     }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    s.stop(color.yellow("Marketplace sync skipped"));
+    p.log.warn(
+      color.yellow("git refresh on marketplace failed") + ` — ${message}`,
+    );
+    p.log.info(
+      color.dim("  Continuing — cache dir update will still happen."),
+    );
   }
+}
 
-  // Step 1: Pull latest from GitHub
+async function upgradePullBuildAndInstall(
+  localVersion: string,
+  pluginRoot: string,
+  adapter: HookAdapter,
+  detection: ReturnType<typeof detectPlatform>,
+  s: ReturnType<typeof p.spinner>,
+  changes: string[],
+): Promise<{ success: boolean; upToDate: boolean }> {
   p.log.step("Pulling latest from GitHub...");
-  const localVersion = getLocalVersion();
   const tmpDir = join(tmpdir(), `context-mode-upgrade-${Date.now()}`);
 
   s.start("Cloning ShmidtS/context-mode");
@@ -717,62 +816,48 @@ async function upgrade() {
     );
     s.stop("Downloaded");
 
-    const srcDir = tmpDir;
     const newPkg = JSON.parse(
-      readFileSync(resolve(srcDir, "package.json"), "utf-8"),
+      readFileSync(resolve(tmpDir, "package.json"), "utf-8"),
     );
     const newVersion = newPkg.version ?? "unknown";
-    
+
     if (newVersion === localVersion) {
       p.log.success(color.green("Already on latest") + ` — v${localVersion}`);
       rmSync(tmpDir, { recursive: true, force: true });
-      return;
-    } else {
-      p.log.info(
-        `Update available: ${color.yellow("v" + localVersion)} → ${color.green("v" + newVersion)}`,
-      );
+      return { success: true, upToDate: true };
     }
 
-    // Step 2: Install dependencies + build
+    p.log.info(
+      `Update available: ${color.yellow("v" + localVersion)} → ${color.green("v" + newVersion)}`,
+    );
+
     s.start("Installing dependencies & building");
     npmExecFile(["install", "--no-audit", "--no-fund"], {
-      cwd: srcDir,
+      cwd: tmpDir,
       stdio: "pipe",
       timeout: 120000,
     });
     npmExecFile(["run", "build"], {
-      cwd: srcDir,
+      cwd: tmpDir,
       stdio: "pipe",
       timeout: 60000,
     });
     s.stop("Built successfully");
 
-    // Step 3: Update in-place
     s.start("Updating files in-place");
-
-    // Old version dirs are cleaned lazily by sessionstart.mjs (age-gated >1h)
-    // to avoid breaking active sessions that still reference them (#181).
-
-    // Read files list from cloned repo's package.json so new directories
-    // (like insight/) are automatically included without chicken-and-egg issues
-    // where the old CLI doesn't know about new directories.
-    const clonedPkg = JSON.parse(readFileSync(resolve(srcDir, "package.json"), "utf-8"));
-    const items = [
-      ...(clonedPkg.files || []),
-      "src", "package.json",
-    ];
+    const clonedPkg = JSON.parse(
+      readFileSync(resolve(tmpDir, "package.json"), "utf-8"),
+    );
+    const items = [...(clonedPkg.files || []), "src", "package.json"];
     for (const item of items) {
       try {
         rmSync(resolve(pluginRoot, item), { recursive: true, force: true });
-        cpSync(resolve(srcDir, item), resolve(pluginRoot, item), { recursive: true });
+        cpSync(resolve(tmpDir, item), resolve(pluginRoot, item), {
+          recursive: true,
+        });
       } catch { /* some files may not exist in source */ }
     }
 
-    // Write .mcp.json with CLAUDE_PLUGIN_ROOT placeholder (fixes #411).
-    // Absolute paths bake-in the current pluginRoot dir, which sessionstart.mjs
-    // (#181) deletes after upgrade — breaking MCP server resolution. The literal
-    // ${CLAUDE_PLUGIN_ROOT} placeholder is resolved by Claude at load-time and
-    // stays valid across version cleanups. Matches .claude-plugin/plugin.json.
     const mcpConfig = {
       mcpServers: {
         "context-mode": {
@@ -785,14 +870,11 @@ async function upgrade() {
       resolve(pluginRoot, ".mcp.json"),
       JSON.stringify(mcpConfig, null, 2) + "\n",
     );
-
     s.stop(color.green(`Updated in-place to v${newVersion}`));
 
-    // Fix registry — adapter-aware
     adapter.updatePluginRegistry(pluginRoot, newVersion);
     p.log.info(color.dim("  Registry synced to " + pluginRoot));
 
-    // Install production deps
     s.start("Installing production dependencies");
     npmExecFile(["install", "--production", "--no-audit", "--no-fund"], {
       cwd: pluginRoot,
@@ -801,29 +883,26 @@ async function upgrade() {
     });
     s.stop("Dependencies ready");
 
-    if (detection.platform !== 'opencode' && detection.platform !== 'kilo') {
-      // Rebuild native addons for current Node.js ABI (fixes #131)
+    if (
+      detection.platform !== "opencode" &&
+      detection.platform !== "kilo"
+    ) {
       s.start("Rebuilding native addons");
       const bsqBindingPath = resolve(
-        pluginRoot, "node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node",
+        pluginRoot,
+        "node_modules",
+        "better-sqlite3",
+        "build",
+        "Release",
+        "better_sqlite3.node",
       );
-      // Skip rebuild when the binding from `npm install --production` is
-      // already present. Earlier code ran `npm rebuild better-sqlite3`
-      // unconditionally — its internal prebuild-install spawn raced with
-      // the prior install's tree-prune, intermittently failing to resolve
-      // `rc/index.js` and printing a scary "rebuild warning" even though
-      // the binding was healthy. Pre-check eliminates the race for the
-      // 99% case (binding survived install).
       if (existsSync(bsqBindingPath)) {
-        s.stop(color.green("Native addons OK") + color.dim(" — binding present"));
+        s.stop(
+          color.green("Native addons OK") +
+            color.dim(" — binding present"),
+        );
         changes.push("better-sqlite3 binding already present (no rebuild needed)");
       } else {
-        // Binding actually missing — delegate to the shared 3-layer heal
-        // (scripts/heal-better-sqlite3.mjs, PR #410) instead of raw
-        // `npm rebuild`. Single source of truth across postinstall +
-        // ensure-deps + cli upgrade. Layer A spawns prebuild-install
-        // directly via process.execPath, bypassing PATH/MSVC and the
-        // npm-internal rc-resolution race that bit `npm rebuild`.
         try {
           const healUrl = pathToFileURL(
             resolve(pluginRoot, "scripts", "heal-better-sqlite3.mjs"),
@@ -831,57 +910,79 @@ async function upgrade() {
           const { healBetterSqlite3Binding } = await import(healUrl);
           const result = healBetterSqlite3Binding(pluginRoot);
           if (result?.healed) {
-            s.stop(color.green("Native addons healed") + color.dim(` (${result.reason})`));
+            s.stop(
+              color.green("Native addons healed") +
+                color.dim(` (${result.reason})`),
+            );
             changes.push(`Healed better-sqlite3 binding via ${result.reason}`);
           } else {
-            s.stop(color.yellow("Native addon heal needs manual step"));
+            s.stop(
+              color.yellow("Native addon heal needs manual step"),
+            );
             p.log.warn(
-              color.dim(`  Run: cd "${pluginRoot}" && npm install better-sqlite3`),
+              color.dim(
+                `  Run: cd "${pluginRoot}" && npm install better-sqlite3`,
+              ),
             );
           }
         } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
+          const message =
+            err instanceof Error ? err.message : String(err);
           s.stop(color.yellow("Native addon heal unavailable"));
           p.log.warn(
             color.yellow("better-sqlite3 heal helper missing") +
               ` — ${message}` +
-              color.dim(`\n  Try manually: cd "${pluginRoot}" && npm rebuild better-sqlite3`),
+              color.dim(
+                `\n  Try manually: cd "${pluginRoot}" && npm rebuild better-sqlite3`,
+              ),
           );
         }
       }
     }
-    
-    // Update global npm
+
     s.start("Updating npm global package");
     try {
-      npmExecFile(["install", "-g", pluginRoot, "--no-audit", "--no-fund"], {
-        stdio: "pipe",
-        timeout: 30000,
-      });
+      npmExecFile(
+        ["install", "-g", pluginRoot, "--no-audit", "--no-fund"],
+        { stdio: "pipe", timeout: 30000 },
+      );
       s.stop(color.green("npm global updated"));
       changes.push("Updated npm global package");
     } catch {
       s.stop(color.yellow("npm global update skipped"));
-      p.log.info(color.dim("  Could not update global npm — may need sudo or standalone install"));
+      p.log.info(
+        color.dim(
+          "  Could not update global npm — may need sudo or standalone install",
+        ),
+      );
     }
 
-    // Cleanup
     rmSync(tmpDir, { recursive: true, force: true });
 
-    // Sync skills to the active install path from installed_plugins.json (#228).
-    // Only targets the ACTUAL directory Claude Code reads from — not spraying everywhere.
     try {
-      const registryPath = resolve(homedir(), ".claude", "plugins", "installed_plugins.json");
+      const registryPath = resolve(
+        homedir(),
+        ".claude",
+        "plugins",
+        "installed_plugins.json",
+      );
       if (existsSync(registryPath)) {
         const registry = JSON.parse(readFileSync(registryPath, "utf-8"));
-        const entries = registry?.plugins?.["context-mode@context-mode"];
+        const entries =
+          registry?.plugins?.["context-mode@context-mode"];
         if (Array.isArray(entries)) {
           for (const entry of entries) {
             const installPath = entry.installPath;
-            if (installPath && installPath !== pluginRoot && existsSync(installPath)) {
-              const srcSkills = resolve(srcDir, "skills");
+            if (
+              installPath &&
+              installPath !== pluginRoot &&
+              existsSync(installPath)
+            ) {
+              const srcSkills = resolve(tmpDir, "skills");
               if (existsSync(srcSkills)) {
-                cpSync(srcSkills, resolve(installPath, "skills"), { recursive: true });
+                cpSync(srcSkills, resolve(installPath, "skills"), {
+                  recursive: true,
+                });
                 changes.push(`Synced skills to active install path`);
               }
             }
@@ -890,52 +991,70 @@ async function upgrade() {
       }
     } catch { /* best effort — registry may not exist or be malformed */ }
 
-    changes.push(
-      newVersion !== localVersion
-        ? `Updated v${localVersion} → v${newVersion}`
-        : `Reinstalled v${localVersion} from GitHub`,
-    );
+    changes.push(`Updated v${localVersion} → v${newVersion}`);
     p.log.success(
       color.green("Plugin reinstalled from GitHub!") +
         color.dim(` — v${newVersion}`),
     );
+    return { success: true, upToDate: false };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     s.stop(color.red("Update failed"));
     p.log.error(color.red("GitHub pull failed") + ` — ${message}`);
     p.log.info(color.dim("Continuing with hooks/settings fix..."));
-    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch { /* ignore */ }
+    return { success: false, upToDate: false };
   }
+}
 
-  // Step 3: Backup settings — adapter-aware
+function upgradeBackupSettings(
+  adapter: HookAdapter,
+  changes: string[],
+): void {
   p.log.step(`Backing up ${adapter.name} settings...`);
   const backupPath = adapter.backupSettings();
   if (backupPath?.endsWith(".bak")) {
-    p.log.success(color.green("Backup created") + color.dim(" -> " + backupPath));
+    p.log.success(
+      color.green("Backup created") + color.dim(" -> " + backupPath),
+    );
     changes.push("Backed up settings");
   } else if (backupPath) {
-    p.log.success(color.green("Backup skipped") + color.dim(" — no changes needed"));
+    p.log.success(
+      color.green("Backup skipped") + color.dim(" — no changes needed"),
+    );
   } else {
     p.log.warn(
       color.yellow("No existing settings to backup") +
         " — a new one will be created",
     );
   }
+}
 
-  // Step 4: Configure hooks — adapter-aware
+function upgradeConfigureHooks(
+  adapter: HookAdapter,
+  pluginRoot: string,
+  changes: string[],
+): void {
   p.log.step(`Configuring ${adapter.name} hooks...`);
   const hookChanges = adapter.configureAllHooks(pluginRoot);
   for (const change of hookChanges) {
     p.log.info(color.dim(`  ${change}`));
     changes.push(change);
   }
-  p.log.success(color.green("Hooks configured") + color.dim(` — ${adapter.name}`));
+  p.log.success(
+    color.green("Hooks configured") + color.dim(` — ${adapter.name}`),
+  );
+}
 
-  // Step 5: Set hook script permissions — adapter-aware
+function upgradeSetPermissions(
+  adapter: HookAdapter,
+  pluginRoot: string,
+  changes: string[],
+): void {
   p.log.step("Setting hook script permissions...");
   const permSet = adapter.setHookPermissions(pluginRoot);
-  // Also ensure CLI binaries are executable (tsc doesn't set +x)
-  // chmod is POSIX-only — skip on Windows where execute bits are irrelevant
   if (process.platform !== "win32") {
     for (const bin of ["build/cli.js", "cli.bundle.mjs"]) {
       const binPath = resolve(pluginRoot, bin);
@@ -947,7 +1066,10 @@ async function upgrade() {
     }
   }
   if (permSet.length > 0) {
-    p.log.success(color.green("Permissions set") + color.dim(` — ${permSet.length} hook script(s)`));
+    p.log.success(
+      color.green("Permissions set") +
+        color.dim(` — ${permSet.length} hook script(s)`),
+    );
     changes.push(`Set ${permSet.length} hook scripts as executable`);
   } else {
     p.log.error(
@@ -955,8 +1077,9 @@ async function upgrade() {
         color.dim(" — expected in " + resolve(pluginRoot, "hooks")),
     );
   }
+}
 
-  // Step 6: Report
+function upgradeReportChanges(changes: string[]): void {
   if (changes.length > 0) {
     p.note(
       changes.map((c) => color.green("  + ") + c).join("\n"),
@@ -965,24 +1088,31 @@ async function upgrade() {
   } else {
     p.log.info(color.dim("No changes were needed."));
   }
+}
 
-  // Restart notice — new MCP tools require MCP server restart
-  const restartHint = adapter.name === "Claude Code"
-    ? "/reload-plugins, new terminal, or restart session"
-    : "new terminal or restart session";
+function upgradeRestartNotice(adapter: HookAdapter): void {
+  const restartHint =
+    adapter.name === "Claude Code"
+      ? "/reload-plugins, new terminal, or restart session"
+      : "new terminal or restart session";
   p.log.warn(
     color.yellow("Restart for new MCP tools to take effect.") +
       color.dim(` (${restartHint})`),
   );
+}
 
-  // Step 7: Run doctor
+async function upgradeRunDoctor(
+  pluginRoot: string,
+  adapter: HookAdapter,
+): Promise<void> {
   p.log.step("Running doctor to verify...");
   console.log();
-
   try {
     const cliBundlePath = resolve(pluginRoot, "cli.bundle.mjs");
     const cliBuildPath = resolve(pluginRoot, "build", "cli.js");
-    const cliPath = existsSync(cliBundlePath) ? cliBundlePath : cliBuildPath;
+    const cliPath = existsSync(cliBundlePath)
+      ? cliBundlePath
+      : cliBuildPath;
     execFileSync("node", [cliPath, "doctor"], {
       stdio: "inherit",
       timeout: 30000,
@@ -994,6 +1124,43 @@ async function upgrade() {
         color.dim(` — restart your ${adapter.name} session to pick up the new version`),
     );
   }
+}
+
+async function upgrade() {
+  if (process.stdout.isTTY) console.clear();
+
+  const detection = detectPlatform();
+  const adapter = await getAdapter(detection.platform);
+
+  p.intro(color.bgCyan(color.black(" context-mode upgrade ")));
+  p.log.info(
+    `Platform: ${color.cyan(adapter.name)}` +
+      color.dim(` (${detection.confidence} confidence)`),
+  );
+
+  const pluginRoot = getPluginRoot();
+  const changes: string[] = [];
+  const s = p.spinner();
+
+  await upgradeSyncMarketplace(s, changes);
+
+  const localVersion = getLocalVersion();
+  const pullResult = await upgradePullBuildAndInstall(
+    localVersion,
+    pluginRoot,
+    adapter,
+    detection,
+    s,
+    changes,
+  );
+  if (pullResult.upToDate) return;
+
+  upgradeBackupSettings(adapter, changes);
+  upgradeConfigureHooks(adapter, pluginRoot, changes);
+  upgradeSetPermissions(adapter, pluginRoot, changes);
+  upgradeReportChanges(changes);
+  upgradeRestartNotice(adapter);
+  await upgradeRunDoctor(pluginRoot, adapter);
 }
 
 /* -------------------------------------------------------
