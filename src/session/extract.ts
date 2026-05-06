@@ -47,11 +47,6 @@ function safeString(value: string | null | undefined): string {
   return String(value);
 }
 
-/** Serialise an unknown value to a string — no truncation. */
-function safeStringAny(value: unknown): string {
-  if (value == null) return "";
-  return typeof value === "string" ? value : JSON.stringify(value);
-}
 
 // ── Category extractors ────────────────────────────────────────────────────
 
@@ -315,10 +310,10 @@ function extractPlan(input: HookInput): SessionEvent[] {
     // Plan exit event with allowedPrompts detail
     const prompts = input.tool_input["allowedPrompts"];
     const detail = Array.isArray(prompts) && prompts.length > 0
-      ? `exited plan mode (allowed: ${safeStringAny(prompts.map((p: unknown) => {
+      ? `exited plan mode (allowed: ${prompts.map((p: unknown) => {
           if (typeof p === "object" && p !== null && "prompt" in p) return String((p as Record<string, unknown>).prompt);
           return String(p);
-        }).join(", "))})`
+        }).join(", ")})`
       : "exited plan mode";
     events.push({
       type: "plan_exit",
@@ -673,7 +668,7 @@ function extractAgentFinding(input: HookInput): SessionEvent[] {
  */
 function extractExternalRef(input: HookInput): SessionEvent[] {
   const haystack = [
-    safeStringAny(input.tool_input),
+    JSON.stringify(input.tool_input),
     safeString(input.tool_response),
   ].join(" ");
 

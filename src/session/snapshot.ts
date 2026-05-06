@@ -111,37 +111,25 @@ function buildFilesSection(fileEvents: StoredEvent[], searchTool: string): strin
   return lines.join("\n");
 }
 
-function buildErrorsSection(errorEvents: StoredEvent[], searchTool: string): string {
-  if (errorEvents.length === 0) return "";
+/**
+ * Generic section builder for events that display as escaped data lines.
+ * When `dedup` is true, duplicate ev.data entries are suppressed.
+ */
+function buildSimpleSection(
+  events: StoredEvent[],
+  tag: string,
+  searchTool: string,
+  dedup = false,
+): string {
+  if (events.length === 0) return "";
 
+  const seen = dedup ? new Set<string>() : undefined;
   const summaryLines: string[] = [];
   const queryTerms: string[] = [];
 
-  for (const ev of errorEvents) {
-    summaryLines.push(`    ${escapeXML(ev.data)}`);
-    queryTerms.push(ev.data);
-  }
-
-  const queries = buildQueries(queryTerms);
-  const lines = [
-    `  <errors count="${errorEvents.length}">`,
-    ...summaryLines,
-    toolCall(searchTool, queries),
-    `  </errors>`,
-  ];
-  return lines.join("\n");
-}
-
-function buildDecisionsSection(decisionEvents: StoredEvent[], searchTool: string): string {
-  if (decisionEvents.length === 0) return "";
-
-  const seen = new Set<string>();
-  const summaryLines: string[] = [];
-  const queryTerms: string[] = [];
-
-  for (const ev of decisionEvents) {
-    if (seen.has(ev.data)) continue;
-    seen.add(ev.data);
+  for (const ev of events) {
+    if (seen?.has(ev.data)) continue;
+    seen?.add(ev.data);
     summaryLines.push(`    ${escapeXML(ev.data)}`);
     queryTerms.push(ev.data);
   }
@@ -150,64 +138,28 @@ function buildDecisionsSection(decisionEvents: StoredEvent[], searchTool: string
 
   const queries = buildQueries(queryTerms);
   const lines = [
-    `  <decisions count="${summaryLines.length}">`,
+    `  <${tag} count="${summaryLines.length}">`,
     ...summaryLines,
     toolCall(searchTool, queries),
-    `  </decisions>`,
+    `  </${tag}>`,
   ];
   return lines.join("\n");
 }
 
-function buildRulesSection(ruleEvents: StoredEvent[], searchTool: string): string {
-  if (ruleEvents.length === 0) return "";
-
-  const seen = new Set<string>();
-  const summaryLines: string[] = [];
-  const queryTerms: string[] = [];
-
-  for (const ev of ruleEvents) {
-    if (seen.has(ev.data)) continue;
-    seen.add(ev.data);
-
-    if (ev.type === "rule_content") {
-      summaryLines.push(`    ${escapeXML(ev.data)}`);
-    } else {
-      summaryLines.push(`    ${escapeXML(ev.data)}`);
-    }
-    queryTerms.push(ev.data);
-  }
-
-  if (summaryLines.length === 0) return "";
-
-  const queries = buildQueries(queryTerms);
-  const lines = [
-    `  <rules count="${summaryLines.length}">`,
-    ...summaryLines,
-    toolCall(searchTool, queries),
-    `  </rules>`,
-  ];
-  return lines.join("\n");
+function buildErrorsSection(events: StoredEvent[], searchTool: string): string {
+  return buildSimpleSection(events, "errors", searchTool);
 }
 
-function buildGitSection(gitEvents: StoredEvent[], searchTool: string): string {
-  if (gitEvents.length === 0) return "";
+function buildDecisionsSection(events: StoredEvent[], searchTool: string): string {
+  return buildSimpleSection(events, "decisions", searchTool, true);
+}
 
-  const summaryLines: string[] = [];
-  const queryTerms: string[] = [];
+function buildRulesSection(events: StoredEvent[], searchTool: string): string {
+  return buildSimpleSection(events, "rules", searchTool, true);
+}
 
-  for (const ev of gitEvents) {
-    summaryLines.push(`    ${escapeXML(ev.data)}`);
-    queryTerms.push(ev.data);
-  }
-
-  const queries = buildQueries(queryTerms);
-  const lines = [
-    `  <git count="${gitEvents.length}">`,
-    ...summaryLines,
-    toolCall(searchTool, queries),
-    `  </git>`,
-  ];
-  return lines.join("\n");
+function buildGitSection(events: StoredEvent[], searchTool: string): string {
+  return buildSimpleSection(events, "git", searchTool);
 }
 
 /**
@@ -370,30 +322,8 @@ function buildSkillsSection(skillEvents: StoredEvent[], searchTool: string): str
   return lines.join("\n");
 }
 
-function buildRolesSection(roleEvents: StoredEvent[], searchTool: string): string {
-  if (roleEvents.length === 0) return "";
-
-  const seen = new Set<string>();
-  const summaryLines: string[] = [];
-  const queryTerms: string[] = [];
-
-  for (const ev of roleEvents) {
-    if (seen.has(ev.data)) continue;
-    seen.add(ev.data);
-    summaryLines.push(`    ${escapeXML(ev.data)}`);
-    queryTerms.push(ev.data);
-  }
-
-  if (summaryLines.length === 0) return "";
-
-  const queries = buildQueries(queryTerms);
-  const lines = [
-    `  <roles count="${summaryLines.length}">`,
-    ...summaryLines,
-    toolCall(searchTool, queries),
-    `  </roles>`,
-  ];
-  return lines.join("\n");
+function buildRolesSection(events: StoredEvent[], searchTool: string): string {
+  return buildSimpleSection(events, "roles", searchTool, true);
 }
 
 function buildIntentSection(intentEvents: StoredEvent[]): string {
@@ -449,6 +379,11 @@ export function buildResumeSnapshot(
       case "intent": intentEvents.push(ev); break;
       case "skill": skillEvents.push(ev); break;
       case "role": roleEvents.push(ev); break;
+      default:
+        if (process.env.NODE_ENV !== "production") {
+          console.warn(`[snapshot] Unhandled category: ${ev.category}`);
+        }
+        break;
     }
   }
 

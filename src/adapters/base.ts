@@ -31,20 +31,19 @@ export abstract class BaseAdapter {
     return dir;
   }
 
-  getSessionDBPath(projectDir: string): string {
-    const hash = createHash("sha256")
+  #projectHash(projectDir: string): string {
+    return createHash("sha256")
       .update(projectDir)
       .digest("hex")
       .slice(0, 16);
-    return join(this.getSessionDir(), `${hash}.db`);
+  }
+
+  getSessionDBPath(projectDir: string): string {
+    return join(this.getSessionDir(), `${this.#projectHash(projectDir)}.db`);
   }
 
   getSessionEventsPath(projectDir: string): string {
-    const hash = createHash("sha256")
-      .update(projectDir)
-      .digest("hex")
-      .slice(0, 16);
-    return join(this.getSessionDir(), `${hash}-events.md`);
+    return join(this.getSessionDir(), `${this.#projectHash(projectDir)}-events.md`);
   }
 
   /**

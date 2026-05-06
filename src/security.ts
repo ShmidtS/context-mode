@@ -60,15 +60,21 @@ function convertGlobPart(glob: string): string {
 
 // Cache compiled glob regexes by pattern string + flags (LRU, max 256)
 const CACHE_MAX = 256;
-const globRegexCache = new Map<string, RegExp>();
 
-/** Evict oldest entry when cache exceeds max size. */
-function evictIfNeeded(cache: Map<string, unknown>): void {
-  if (cache.size >= CACHE_MAX) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== undefined) cache.delete(oldest);
+class LRUCache<K, V> {
+  private cache = new Map<K, V>();
+  constructor(private maxSize: number) {}
+  get(key: K): V | undefined { return this.cache.get(key); }
+  set(key: K, value: V): void {
+    if (this.cache.size >= this.maxSize) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest !== undefined) this.cache.delete(oldest);
+    }
+    this.cache.set(key, value);
   }
 }
+
+const globRegexCache = new LRUCache<string, RegExp>(CACHE_MAX);
 
 /**
  * Convert a Bash permission glob to a regex.
@@ -102,13 +108,12 @@ export function globToRegex(
   }
 
   const regex = new RegExp(regexStr, caseInsensitive ? "i" : "");
-  evictIfNeeded(globRegexCache);
   globRegexCache.set(cacheKey, regex);
   return regex;
 }
 
 // Cache compiled file glob regexes by pattern string + flags (LRU, max 256)
-const fileGlobRegexCache = new Map<string, RegExp>();
+const fileGlobRegexCache = new LRUCache<string, RegExp>(CACHE_MAX);
 
 /**
  * Convert a file path glob to a regex.
@@ -157,7 +162,6 @@ export function fileGlobToRegex(
   }
 
   const regex = new RegExp(`^${regexStr}$`, caseInsensitive ? "i" : "");
-  evictIfNeeded(fileGlobRegexCache);
   fileGlobRegexCache.set(cacheKey, regex);
   return regex;
 }

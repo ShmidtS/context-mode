@@ -419,12 +419,12 @@ const _liveDBs: Set<DatabaseInstance> = (() => {
 })();
 
 export abstract class SQLiteBase {
-  readonly #dbPath: string;
-  readonly #db: DatabaseInstance;
+  protected readonly _dbPath: string;
+  protected readonly _db: DatabaseInstance;
 
   constructor(dbPath: string) {
     const Database = loadDatabase();
-    this.#dbPath = dbPath;
+    this._dbPath = dbPath;
     cleanOrphanedWALFiles(dbPath);
     let db: DatabaseInstance;
     try {
@@ -447,8 +447,8 @@ export abstract class SQLiteBase {
         throw err;
       }
     }
-    this.#db = db;
-    _liveDBs.add(this.#db);
+    this._db = db;
+    _liveDBs.add(this._db);
     this.initSchema();
     this.prepareStatements();
   }
@@ -461,18 +461,18 @@ export abstract class SQLiteBase {
 
   /** Raw database instance — available to subclasses only. */
   protected get db(): DatabaseInstance {
-    return this.#db;
+    return this._db;
   }
 
   /** The path this database was opened from. */
   get dbPath(): string {
-    return this.#dbPath;
+    return this._dbPath;
   }
 
   /** Close the database connection without deleting files. */
   close(): void {
-    _liveDBs.delete(this.#db);
-    closeDB(this.#db);
+    _liveDBs.delete(this._db);
+    closeDB(this._db);
   }
 
   protected withRetry<T>(fn: () => T): T {
@@ -484,8 +484,8 @@ export abstract class SQLiteBase {
    * Call on process exit or at end of session lifecycle.
    */
   cleanup(): void {
-    _liveDBs.delete(this.#db);
-    closeDB(this.#db);
-    deleteDBFiles(this.#dbPath);
+    _liveDBs.delete(this._db);
+    closeDB(this._db);
+    deleteDBFiles(this._dbPath);
   }
 }

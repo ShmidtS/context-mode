@@ -374,12 +374,9 @@ export class PolyglotExecutor {
           rawStderr += `\n[output capped at ${(this.#hardCapBytes / 1024 / 1024).toFixed(0)}MB — process killed]`;
         }
 
-        const stdout = rawStdout;
-        const stderr = rawStderr;
-
         res({
-          stdout,
-          stderr,
+          stdout: rawStdout,
+          stderr: rawStderr,
           exitCode: timedOut ? 1 : (exitCode ?? 1),
           timedOut,
         });

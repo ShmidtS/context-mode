@@ -182,19 +182,6 @@ export function cleanupStaleDBs(): number {
 }
 
 /**
- * Check if a PID is still alive (not a zombie holding a WAL lock).
- * Returns true if the process exists, false if it's dead.
- */
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Clean up stale per-project content store DBs older than maxAgeDays.
  * Scans the given directory for *.db files and checks mtime.
  * Also detects zombie processes holding WAL locks — if a WAL file exists
@@ -796,6 +783,41 @@ export class ContentStore {
     return sourceMatchMode === "exact" ? source : `%${source}%`;
   }
 
+  #selectSearchStmt(
+    stmts: {
+      base: PreparedStatement;
+      filtered: PreparedStatement;
+      exact: PreparedStatement;
+      contentType: PreparedStatement;
+      filteredContentType: PreparedStatement;
+      exactContentType: PreparedStatement;
+    },
+    sanitized: string,
+    limit: number,
+    source: string | undefined,
+    contentType: "code" | "prose" | undefined,
+    sourceMatchMode: SourceMatchMode,
+  ): { stmt: PreparedStatement; params: unknown[] } {
+    if (source && contentType) {
+      return {
+        stmt: sourceMatchMode === "exact"
+          ? stmts.exactContentType
+          : stmts.filteredContentType,
+        params: [sanitized, this.#sourceFilterParam(source, sourceMatchMode), contentType, limit],
+      };
+    }
+    if (source) {
+      return {
+        stmt: sourceMatchMode === "exact" ? stmts.exact : stmts.filtered,
+        params: [sanitized, this.#sourceFilterParam(source, sourceMatchMode), limit],
+      };
+    }
+    if (contentType) {
+      return { stmt: stmts.contentType, params: [sanitized, contentType, limit] };
+    }
+    return { stmt: stmts.base, params: [sanitized, limit] };
+  }
+
   search(
     query: string,
     limit: number = 3,
@@ -805,28 +827,17 @@ export class ContentStore {
     sourceMatchMode: SourceMatchMode = "like",
   ): SearchResult[] {
     const sanitized = sanitizeQuery(query, mode);
-
-    let stmt: PreparedStatement;
-    let params: unknown[];
-
-    if (source && contentType) {
-      stmt = sourceMatchMode === "exact"
-        ? this.#stmtSearchPorterExactContentType
-        : this.#stmtSearchPorterFilteredContentType;
-      params = [sanitized, this.#sourceFilterParam(source, sourceMatchMode), contentType, limit];
-    } else if (source) {
-      stmt = sourceMatchMode === "exact"
-        ? this.#stmtSearchPorterExact
-        : this.#stmtSearchPorterFiltered;
-      params = [sanitized, this.#sourceFilterParam(source, sourceMatchMode), limit];
-    } else if (contentType) {
-      stmt = this.#stmtSearchPorterContentType;
-      params = [sanitized, contentType, limit];
-    } else {
-      stmt = this.#stmtSearchPorter;
-      params = [sanitized, limit];
-    }
-
+    const { stmt, params } = this.#selectSearchStmt(
+      {
+        base: this.#stmtSearchPorter,
+        filtered: this.#stmtSearchPorterFiltered,
+        exact: this.#stmtSearchPorterExact,
+        contentType: this.#stmtSearchPorterContentType,
+        filteredContentType: this.#stmtSearchPorterFilteredContentType,
+        exactContentType: this.#stmtSearchPorterExactContentType,
+      },
+      sanitized, limit, source, contentType, sourceMatchMode,
+    );
     return withRetry(() => this.#mapSearchRows(stmt.all(...params) as SearchRow[]));
   }
 
@@ -842,28 +853,17 @@ export class ContentStore {
   ): SearchResult[] {
     const sanitized = sanitizeTrigramQuery(query, mode);
     if (!sanitized) return [];
-
-    let stmt: PreparedStatement;
-    let params: unknown[];
-
-    if (source && contentType) {
-      stmt = sourceMatchMode === "exact"
-        ? this.#stmtSearchTrigramExactContentType
-        : this.#stmtSearchTrigramFilteredContentType;
-      params = [sanitized, this.#sourceFilterParam(source, sourceMatchMode), contentType, limit];
-    } else if (source) {
-      stmt = sourceMatchMode === "exact"
-        ? this.#stmtSearchTrigramExact
-        : this.#stmtSearchTrigramFiltered;
-      params = [sanitized, this.#sourceFilterParam(source, sourceMatchMode), limit];
-    } else if (contentType) {
-      stmt = this.#stmtSearchTrigramContentType;
-      params = [sanitized, contentType, limit];
-    } else {
-      stmt = this.#stmtSearchTrigram;
-      params = [sanitized, limit];
-    }
-
+    const { stmt, params } = this.#selectSearchStmt(
+      {
+        base: this.#stmtSearchTrigram,
+        filtered: this.#stmtSearchTrigramFiltered,
+        exact: this.#stmtSearchTrigramExact,
+        contentType: this.#stmtSearchTrigramContentType,
+        filteredContentType: this.#stmtSearchTrigramFilteredContentType,
+        exactContentType: this.#stmtSearchTrigramExactContentType,
+      },
+      sanitized, limit, source, contentType, sourceMatchMode,
+    );
     return withRetry(() => this.#mapSearchRows(stmt.all(...params) as SearchRow[]));
   }
 

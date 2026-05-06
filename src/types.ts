@@ -30,9 +30,16 @@ export interface UserMessage {
  * message, assistant response summary, etc.) for later resume-snapshot
  * reconstruction.
  */
+export type EventCategory =
+  | "file" | "rule" | "cwd" | "error" | "git" | "task" | "plan"
+  | "env" | "skill" | "constraint" | "subagent" | "mcp" | "mcp_tool_call"
+  | "decision" | "agent-finding" | "external-ref" | "blocked-on" | "data"
+  | "error-resolution" | "iteration-loop" | "intent" | "role"
+  | "prompt" | "user-prompt" | "openclaw" | "pi";
+
 export interface SessionEvent {
   type: string;
-  category: string;
+  category: EventCategory;
   data: string;
   priority: number;
   data_hash: string;
