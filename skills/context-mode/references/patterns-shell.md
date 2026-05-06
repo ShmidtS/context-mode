@@ -1,7 +1,6 @@
-# Shell Patterns for execute
+# Shell Patterns for ctx_execute
 
-Practical patterns for using `execute` with `language: shell`.
-Best for piping, filtering, and leveraging native OS tools.
+Patterns for `language: shell`. Best for piping, filtering, native OS tools.
 
 ---
 

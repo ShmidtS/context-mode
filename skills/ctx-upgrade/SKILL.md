@@ -14,7 +14,7 @@ Pull latest from GitHub and reinstall the plugin.
 ## Instructions
 
 1. Call the `ctx_upgrade` MCP tool directly. It returns a shell command to execute.
-2. Run the returned command using your shell execution tool (Bash, shell_execute, etc.).
+2. Run the returned command.
 3. Display results as a markdown checklist:
    ```
    ## context-mode upgrade

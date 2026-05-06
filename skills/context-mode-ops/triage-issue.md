@@ -78,45 +78,15 @@ Agents to spawn:
 
 ### 4. Claim Verification — BLOCKING GATE
 
-<claim_verification_enforcement>
-STOP. Before ANY agent writes implementation code, the claim in the issue MUST be verified
-with hard evidence. We shipped inheritEnvKeys because an LLM said Claude Code strips env vars
-— it doesn't. We got burned shipping a fix for an unverified claim. Never again.
-</claim_verification_enforcement>
+STOP. Before ANY agent writes implementation code, verify the claim with hard evidence.
 
-**Every issue makes a claim. Verify it BEFORE coding.**
+Follow the full protocol in [validation.md](validation.md) (Problem Verification — FIRST GATE).
 
-| Issue Type | Required Evidence | How to Get It |
-|------------|-------------------|---------------|
-| **Bug report** | Reproduce locally with a failing test or command | Run the exact steps from the report. If it doesn't fail, the bug may not exist. |
-| **Feature request claiming behavior X** | Prove behavior X actually happens | Check official docs, source code, or web search. NOT LLM knowledge — LLMs hallucinate platform behavior. |
-| **Feature request claiming perf issue** | Benchmark the actual impact | Measure before/after. No "it should be faster" — show numbers. |
-| **"Tool X sets env var Y"** | Find it in official source | `ctx_fetch_and_index` the platform's docs/source. Grep their repo. If you can't find it, it probably doesn't exist. |
-
-**Verification Steps:**
-
-1. **Architect agents** must produce a `CLAIM_VERDICT` before any Staff Engineer writes code:
-   ```
-   CLAIM: "{exact claim from the issue}"
-   EVIDENCE: {link to official doc, source file, or reproduction output}
-   VERDICT: CONFIRMED | UNCONFIRMED | HALLUCINATED
-   ```
-
-2. If `VERDICT: UNCONFIRMED` — do NOT implement. Instead, comment on the issue:
-   ```
-   We couldn't reproduce/verify this claim. Could you provide:
-   - Debug output from: npx context-mode doctor (or ctx-debug.sh)
-   - Exact steps to reproduce
-   - Platform version and OS
-
-   We want to fix this but need to confirm the problem exists first.
-   ```
-
-3. If `VERDICT: HALLUCINATED` — the reporter (or their LLM) made up a behavior that doesn't exist. Comment kindly explaining the misunderstanding. Close with "working as intended" if appropriate.
-
-4. Only `VERDICT: CONFIRMED` proceeds to the Investigation Phase below.
-
-**The `ctx-debug.sh` script exists for exactly this purpose.** When in doubt, ask the reporter to run it and paste the output.
+Key requirements:
+- Architect agents MUST produce a `CLAIM_VERDICT` before any Staff Engineer writes code
+- Only `VERDICT: CONFIRMED` proceeds to Investigation Phase (step 5)
+- `VERDICT: UNCONFIRMED` → request evidence from reporter
+- `VERDICT: HALLUCINATED` → explain kindly, close if appropriate
 
 ### 5. Investigation Phase (Parallel)
 
@@ -203,7 +173,7 @@ git commit -m "fix: {concise description} (closes #{N})
 - {what was fixed}
 - {which adapters/modules affected}
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude <noreply@anthropic.com>"
 
 # Push to next
 git push origin next

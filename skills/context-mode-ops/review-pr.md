@@ -168,7 +168,7 @@ git commit -m "fix: address review findings from #{N}
 - {fix 1}
 - {fix 2}
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude <noreply@anthropic.com>"
 
 git push origin next
 ```
@@ -231,34 +231,11 @@ gh pr close {N}
 
 ## ENV/Feature Validation Protocol
 
-This is the most critical part of PR review. LLMs frequently hallucinate ENV vars, hooks, and features.
+LLMs frequently hallucinate ENV vars, hooks, and features. Follow the full protocol in [validation.md](validation.md) (ENV Variable Verification).
 
-### Red Flags to Watch For
+Red flags: new ENV variable, new hook type, config path, API endpoint, feature flag.
 
-1. **New ENV variable** — Does this actually exist in the platform?
-2. **New hook type** — Does the platform support this hook lifecycle?
-3. **Config path** — Is this the real config location?
-4. **API endpoint** — Does this API actually exist?
-5. **Feature flag** — Is this a real feature of the platform?
-
-### Verification Steps
-
-For EACH claim in the PR:
-
-1. **Grep source**: `rg "{CLAIM}" src/` — is it already used?
-2. **WebSearch**: Search for official documentation of the claim
-3. **Context7**: `resolve-library-id` → `query-docs` for the platform
-4. **GitHub source**: Check the platform's actual repository if open source
-
-### Example: Fake ENV Detection
-
-```
-PR adds: process.env.OPENCODE_HOOK_PATH
-Step 1: rg "OPENCODE_HOOK_PATH" src/ → not found
-Step 2: WebSearch "OpenCode OPENCODE_HOOK_PATH environment variable" → no results
-Step 3: Context7 query OpenCode docs for "HOOK_PATH" → not documented
-Verdict: HALLUCINATED — flag to EM, remove from PR
-```
+For EACH claim in the PR: grep source → WebSearch → Context7 → GitHub source. See validation.md for 5-step verification protocol and verdict categories.
 
 ## Handling Stale PRs
 

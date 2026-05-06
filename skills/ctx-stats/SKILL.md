@@ -15,12 +15,10 @@ Show context savings for the current session.
 
 ## Instructions
 
-1. Call the `mcp__context-mode__ctx_stats` MCP tool (no parameters needed).
-2. **CRITICAL**: You MUST copy-paste the ENTIRE tool output as markdown text directly into your response message. Do NOT summarize, do NOT collapse, do NOT paraphrase. The user must see the full tables without pressing ctrl+o. Copy every line exactly as returned by the tool.
-3. After the full output, add ONE sentence highlighting the key savings metric, e.g.:
-   - "context-mode saved **12.4x** — 92% of data stayed in sandbox."
-   - If no data yet: "No context-mode calls yet this session."
+1. Call `ctx_stats` (no parameters needed).
+2. **CRITICAL**: Copy-paste the ENTIRE tool output as markdown text into your response. Do NOT summarize, collapse, or paraphrase. The user must see full tables without pressing ctrl+o.
+3. After the full output, add one sentence highlighting the key savings metric, e.g.: "context-mode saved **12.4x** — 92% of data stayed in sandbox." If no data yet: "No context-mode calls yet this session."
 
-## Purge
+## See Also
 
-- **`ctx_purge(confirm: true)`** — Permanently deletes all indexed content from the knowledge base. Use `/context-mode:ctx-purge` for this.
+- To delete session data, use `/context-mode:ctx-purge`.

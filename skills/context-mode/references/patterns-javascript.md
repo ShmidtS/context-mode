@@ -1,7 +1,6 @@
-# JavaScript / TypeScript Patterns for execute
+# JavaScript / TypeScript Patterns for ctx_execute
 
-Practical patterns for using `execute` with `language: javascript`.
-All examples assume Node.js runtime with native fetch (Node 18+).
+Patterns for `language: javascript`. Node 18+ with native fetch assumed.
 
 ---
 
@@ -10,7 +9,7 @@ All examples assume Node.js runtime with native fetch (Node 18+).
 ### Fetch and summarize a REST API
 
 ```javascript
-// execute: Analyze API health endpoint
+// ctx_execute: Analyze API health endpoint
 const resp = await fetch('https://api.example.com/health');
 const data = await resp.json();
 
@@ -38,7 +37,7 @@ if (data.errors && data.errors.length > 0) {
 ### Paginated API collection
 
 ```javascript
-// execute: Fetch all open issues from GitHub API
+// ctx_execute: Fetch all open issues from GitHub API
 const owner = 'org';
 const repo = 'project';
 let page = 1;
