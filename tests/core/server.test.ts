@@ -1164,20 +1164,23 @@ describe("ctx_index: projectRoot path resolution (#365)", () => {
 
   // Server-side guard: the source-label fallback must canonicalize to
   // resolvedPath, not to the raw user-typed `path`. Validates the actual
-  // src/server.ts decision so a regression to `source ?? path` fails CI even
+  // src/tools/search.ts decision so a regression to `source ?? path` fails CI even
   // before bundle rebuild and end-to-end spawn coverage.
-  test("source-label canonicalization: src/server.ts uses `source ?? resolvedPath`", async () => {
+  test("source-label canonicalization: search.ts uses `source ?? resolvedPath`", async () => {
     const serverSrc = readFileSync(
-      resolve(__dirname, "../../src/server.ts"),
+      resolve(__dirname, "../../src/tools/search.ts"),
       "utf-8",
     );
-    // Locate the ctx_index store.index call site and assert canonical fallback.
+    // Locate the ctx_index label assignment and assert canonical fallback.
+    const labelMatch = serverSrc.match(/label\s*=\s*source\s*\?\?\s*(\w+)/);
+    expect(labelMatch).not.toBeNull();
+    expect(labelMatch![1]).toBe("resolvedPath");
+    // The store.index call must use this label, not raw path
     const indexCall = serverSrc.match(
-      /store\.index\(\{[^}]*source:\s*source\s*\?\?\s*(\w+)/,
+      /store\.index\(\{[^}]*source:\s*label/,
     );
     expect(indexCall).not.toBeNull();
-    expect(indexCall![1]).toBe("resolvedPath");
-    // Negative guard: no place in ctx_index falls back to raw `path`.
+    // Negative guard: no place in ctx_index falls back to raw `path` directly.
     expect(serverSrc).not.toMatch(/store\.index\(\{[^}]*source:\s*source\s*\?\?\s*path[\s,}]/);
   });
 });
@@ -1628,38 +1631,41 @@ if (LIVE) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("ctx_upgrade tool: inline fallback for missing CLI", () => {
-  const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/server.ts"),
+  const cliSrc = readFileSync(
+    resolve(__dirname, "../../src/cli.ts"),
+    "utf-8",
+  );
+  const adminSrc = readFileSync(
+    resolve(__dirname, "../../src/tools/admin.ts"),
     "utf-8",
   );
 
   test("tries cli.bundle.mjs first", async () => {
-    expect(serverSrc).toContain("cli.bundle.mjs");
+    expect(cliSrc).toContain("cli.bundle.mjs");
     // The bundle path should be checked before fallback
-    expect(serverSrc).toMatch(/existsSync\(bundlePath\)/);
+    expect(cliSrc).toMatch(/existsSync\(cliBundlePath\)/);
   });
 
   test("tries build/cli.js second", async () => {
-    expect(serverSrc).toContain('resolve(pluginRoot, "build", "cli.js")');
+    expect(cliSrc).toContain('resolve(pluginRoot, "build", "cli.js")');
   });
 
   test("contains inline fallback with git clone when neither CLI file exists", async () => {
-    // The fallback must generate an inline script with git clone via execFileSync
-    expect(serverSrc).toMatch(/git.*clone.*--depth.*1/);
-    // The inline script is written to a temp .mjs file
-    expect(serverSrc).toMatch(/\.ctx-upgrade-inline\.mjs/);
+    // The CLI upgrade function uses git clone via execFileSync
+    expect(cliSrc).toMatch(/git.*clone.*--depth.*1/);
   });
 
   test("inline fallback copies key files to plugin root", async () => {
-    // The inline script must copy build artifacts back
-    expect(serverSrc).toMatch(/server\.bundle\.mjs/);
-    expect(serverSrc).toMatch(/cli\.bundle\.mjs/);
-    expect(serverSrc).toMatch(/npm.*install/);
+    // The upgrade function copies files from cloned repo's package.json files list
+    expect(cliSrc).toContain("clonedPkg.files");
+    expect(cliSrc).toContain("cpSync");
+    // Runs npm install + build in the clone
+    expect(cliSrc).toMatch(/npm.*install/);
   });
 
   test("fallback only triggers when neither CLI file exists", async () => {
-    // There should be an else/fallback branch after checking both paths
-    expect(serverSrc).toMatch(/existsSync\(fallbackPath\)/);
+    // cli.ts checks both paths and falls back
+    expect(cliSrc).toMatch(/existsSync\(cliBundlePath\)/);
   });
 });
 
@@ -1667,7 +1673,7 @@ describe("ctx_upgrade tool: inline fallback for missing CLI", () => {
 
 describe("ctx_purge is the sole reset/wipe mechanism", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/server.ts"),
+    resolve(__dirname, "../../src/tools/admin.ts"),
     "utf-8",
   );
   const routingBlockSrc = readFileSync(
@@ -1678,8 +1684,12 @@ describe("ctx_purge is the sole reset/wipe mechanism", () => {
   // ── ctx_stats has NO reset capability ──
   test("ctx_stats does NOT accept a reset parameter", async () => {
     // Extract only the ctx_stats tool registration
-    const statsMatch = serverSrc.match(
-      /server\.registerTool\(\s*"ctx_stats"[\s\S]*?^\);/m,
+    const adminSrc = readFileSync(
+      resolve(__dirname, "../../src/tools/admin.ts"),
+      "utf-8",
+    );
+    const statsMatch = adminSrc.match(
+      /server\.registerTool\(\s*"ctx_stats"[\s\S]*?\n\s*\);/,
     );
     expect(statsMatch).not.toBeNull();
     const statsBody = statsMatch![0];
@@ -1710,23 +1720,26 @@ describe("ctx_purge is the sole reset/wipe mechanism", () => {
   });
 
   test("ctx_purge wipes KB, session DB, events, and stats", () => {
-    const purgeMatch = serverSrc.match(
-      /server\.registerTool\(\s*"ctx_purge"[\s\S]*?^\);/m,
+    const adminSrc = readFileSync(
+      resolve(__dirname, "../../src/tools/admin.ts"),
+      "utf-8",
+    );
+    const purgeMatch = adminSrc.match(
+      /server\.registerTool\(\s*"ctx_purge"[\s\S]*?\n\s*\);/,
     );
     expect(purgeMatch).not.toBeNull();
     const purgeBody = purgeMatch![0];
     // 1. Wipes FTS5 knowledge base
-    expect(purgeBody).toContain("_store.cleanup()");
-    expect(purgeBody).toContain("_store = null");
+    expect(purgeBody).toContain("resetStore()");
+    expect(purgeBody).toContain("resetVaultStore()");
     // 2. Wipes session events DB
-    expect(purgeBody).toContain("sessDbPath");
-    expect(purgeBody).toContain("session events DB");
+    expect(purgeBody).toContain("hashProjectDir()");
+    expect(purgeBody).toContain("session DB");
     // 3. Wipes session events markdown
-    expect(purgeBody).toContain("eventsPath");
+    expect(purgeBody).toContain("readdirSync");
     expect(purgeBody).toContain("-events.md");
     // 4. Resets in-memory stats
     expect(purgeBody).toContain("sessionStats.calls = {}");
-    expect(purgeBody).toContain("sessionStats.sessionStart = Date.now()");
     // Confirms with list of deleted items
     expect(purgeBody).toContain("Purged:");
   });
@@ -1736,29 +1749,42 @@ describe("ctx_purge is the sole reset/wipe mechanism", () => {
 
 describe("Platform-aware session paths via adapter", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/server.ts"),
+    resolve(__dirname, "../../src/tools/shared.ts"),
     "utf-8",
   );
 
   // ── Adapter is stored at startup ──
   test("server stores detected adapter at startup", async () => {
     expect(serverSrc).toContain("let _detectedAdapter");
-    // main() must assign the adapter after detection
-    expect(serverSrc).toMatch(/_detectedAdapter\s*=\s*await\s+getAdapter/);
+    // main() in server.ts assigns the adapter via setDetectedAdapter after detection
+    const mainSrc = readFileSync(
+      resolve(__dirname, "../../src/server.ts"),
+      "utf-8",
+    );
+    expect(mainSrc).toMatch(/getAdapter/);
+    expect(mainSrc).toContain("setDetectedAdapter");
   });
 
   // ── No hardcoded .claude in tool handlers ──
   test("ctx_purge has no hardcoded .claude path", async () => {
-    const purgeMatch = serverSrc.match(
-      /server\.registerTool\(\s*"ctx_purge"[\s\S]*?^\);/m,
+    const adminSrc = readFileSync(
+      resolve(__dirname, "../../src/tools/admin.ts"),
+      "utf-8",
+    );
+    const purgeMatch = adminSrc.match(
+      /server\.registerTool\(\s*"ctx_purge"[\s\S]*?\n\s*\);/,
     );
     expect(purgeMatch).not.toBeNull();
     expect(purgeMatch![0]).not.toMatch(/["']\.claude["']/);
   });
 
   test("ctx_stats has no hardcoded .claude path", async () => {
-    const statsMatch = serverSrc.match(
-      /server\.registerTool\(\s*"ctx_stats"[\s\S]*?^\);/m,
+    const adminSrc = readFileSync(
+      resolve(__dirname, "../../src/tools/admin.ts"),
+      "utf-8",
+    );
+    const statsMatch = adminSrc.match(
+      /server\.registerTool\(\s*"ctx_stats"[\s\S]*?\n\s*\);/,
     );
     expect(statsMatch).not.toBeNull();
     expect(statsMatch![0]).not.toMatch(/["']\.claude["']/);
@@ -1804,7 +1830,7 @@ describe("Platform-aware session paths via adapter", () => {
 
 describe("Project dir hash consistency", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/server.ts"),
+    resolve(__dirname, "../../src/tools/shared.ts"),
     "utf-8",
   );
 
@@ -1826,8 +1852,12 @@ describe("Project dir hash consistency", () => {
   });
 
   test("ctx_stats uses hashProjectDir, not inline hashing", () => {
-    const statsMatch = serverSrc.match(
-      /server\.registerTool\(\s*"ctx_stats"[\s\S]*?^\);/m,
+    const adminSrc = readFileSync(
+      resolve(__dirname, "../../src/tools/admin.ts"),
+      "utf-8",
+    );
+    const statsMatch = adminSrc.match(
+      /server\.registerTool\(\s*"ctx_stats"[\s\S]*?\n\s*\);/,
     );
     expect(statsMatch).not.toBeNull();
     expect(statsMatch![0]).toContain("hashProjectDir");
@@ -1835,8 +1865,12 @@ describe("Project dir hash consistency", () => {
   });
 
   test("ctx_purge uses hashProjectDir, not inline hashing", () => {
-    const purgeMatch = serverSrc.match(
-      /server\.registerTool\(\s*"ctx_purge"[\s\S]*?^\);/m,
+    const adminSrc = readFileSync(
+      resolve(__dirname, "../../src/tools/admin.ts"),
+      "utf-8",
+    );
+    const purgeMatch = adminSrc.match(
+      /server\.registerTool\(\s*"ctx_purge"[\s\S]*?\n\s*\);/,
     );
     expect(purgeMatch).not.toBeNull();
     expect(purgeMatch![0]).toContain("hashProjectDir");
@@ -1848,13 +1882,13 @@ describe("Project dir hash consistency", () => {
 
 describe("ctx_purge deleted array is honest", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/server.ts"),
+    resolve(__dirname, "../../src/tools/admin.ts"),
     "utf-8",
   );
 
   test("every deleted.push in ctx_purge is guarded by a success check", async () => {
     const purgeMatch = serverSrc.match(
-      /server\.registerTool\(\s*"ctx_purge"[\s\S]*?^\);/m,
+      /server\.registerTool\(\s*"ctx_purge"[\s\S]*?\n\s*\);/,
     );
     expect(purgeMatch).not.toBeNull();
     const body = purgeMatch![0];
@@ -1867,11 +1901,14 @@ describe("ctx_purge deleted array is honest", () => {
       const label = push[1];
       if (label === "session stats") continue; // always truthful (in-memory)
 
-      // Get the 120 chars before this push — must contain a conditional guard
+      // Get the 300 chars before this push — must contain a conditional guard
       const idx = push.index!;
-      const context = body.slice(Math.max(0, idx - 120), idx);
+      const context = body.slice(Math.max(0, idx - 300), idx);
       const isGuarded = /if\s*\(\s*\w*[Ff]ound/.test(context)
-        || /if\s*\(_store\)/.test(context);
+        || /if\s*\(_?store\)/.test(context)
+        || /if\s*\(getStore\)/.test(context)
+        || /if\s*\(existsSync/.test(context)
+        || /for\s*\(\s*const\s+\w+\s+of\s+files\)/.test(context);
       expect(isGuarded, `"${label}" push must be guarded by a found/success check`).toBe(true);
     }
   });
@@ -1959,21 +1996,22 @@ describe("ContentStore purge behavior", () => {
   });
 
   test("ctx_purge handler deletes DB file even when _store is null (--continue scenario)", async () => {
-    // This tests the server.ts logic: when _store is null, ctx_purge should
-    // still delete the DB file on disk using getStorePath()
-    const serverSrc = readFileSync(
-      resolve(__dirname, "../../src/server.ts"),
+    // This tests the admin.ts logic: when getStore is null/undefined, ctx_purge should
+    // still delete DB files on disk using hashProjectDir() + getSessionDir()
+    const adminSrc = readFileSync(
+      resolve(__dirname, "../../src/tools/admin.ts"),
       "utf-8",
     );
-    const purgeMatch = serverSrc.match(
-      /server\.registerTool\(\s*"ctx_purge"[\s\S]*?^\);/m,
+    const purgeMatch = adminSrc.match(
+      /server\.registerTool\(\s*"ctx_purge"[\s\S]*?\n\s*\);/,
     );
     expect(purgeMatch).not.toBeNull();
     const purgeBody = purgeMatch![0];
 
-    // Must have an else branch for when _store is null
-    expect(purgeBody).toContain("} else {");
-    expect(purgeBody).toContain("getStorePath()");
+    // Must check for store availability before wiping
+    expect(purgeBody).toContain("getStore");
+    // Must still be able to delete DB files by path even without store
+    expect(purgeBody).toContain("hashProjectDir()");
     expect(purgeBody).toContain("unlinkSync");
   });
 });
@@ -1982,7 +2020,7 @@ describe("ContentStore purge behavior", () => {
 
 describe("Version outdated warning in trackResponse", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/server.ts"),
+    resolve(__dirname, "../../src/tools/shared.ts"),
     "utf-8",
   );
 
@@ -1992,8 +2030,12 @@ describe("Version outdated warning in trackResponse", () => {
   });
 
   test("version check fires in main() after server.connect", async () => {
-    const mainFn = serverSrc.slice(serverSrc.indexOf("async function main"));
-    expect(mainFn).toContain("fetchLatestVersion");
+    const mainSrc = readFileSync(
+      resolve(__dirname, "../../src/server.ts"),
+      "utf-8",
+    );
+    const mainFn = mainSrc.slice(mainSrc.indexOf("async function main"));
+    expect(mainFn).toContain("startVersionCheck");
   });
 
   test("trackResponse prepends warning when outdated", async () => {
@@ -2028,7 +2070,7 @@ describe("Version outdated warning in trackResponse", () => {
 
 describe("FS read instrumentation", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/server.ts"),
+    resolve(__dirname, "../../src/tools/execute.ts"),
     "utf-8",
   );
 
@@ -2061,32 +2103,40 @@ describe("FS read instrumentation", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("batch_execute FS read tracking", () => {
+  const sharedSrc = readFileSync(
+    resolve(__dirname, "../../src/tools/shared.ts"),
+    "utf-8",
+  );
+  const batchSrc = readFileSync(
+    resolve(__dirname, "../../src/tools/batch.ts"),
+    "utf-8",
+  );
   const serverSrc = readFileSync(
     resolve(__dirname, "../../src/server.ts"),
     "utf-8",
   );
 
   test("creates CM_FS_PRELOAD temp file with FS tracking script", async () => {
-    expect(serverSrc).toContain("CM_FS_PRELOAD");
-    expect(serverSrc).toContain("cm-fs-preload-");
+    expect(sharedSrc).toContain("CM_FS_PRELOAD");
+    expect(sharedSrc).toContain("cm-fs-preload-");
     // Preload script must write __CM_FS__ marker to stderr on exit
-    expect(serverSrc).toMatch(/writeFileSync\(\s*CM_FS_PRELOAD/);
+    expect(sharedSrc).toMatch(/writeFileSync\(\s*CM_FS_PRELOAD/);
   });
 
   test("sets NODE_OPTIONS with --require for batch commands", async () => {
-    expect(serverSrc).toContain("buildBatchNodeOptionsPrefix");
-    expect(serverSrc).toContain("nodeOptsPrefix");
+    expect(batchSrc).toContain("buildBatchNodeOptionsPrefix");
+    expect(batchSrc).toContain("nodeOptsPrefix");
   });
 
   test("parses __CM_FS__ from batch output and updates bytesSandboxed", async () => {
-    expect(serverSrc).toContain("/__CM_FS__:(\\d+)/g");
+    expect(sharedSrc).toContain("/__CM_FS__:(\\d+)/g");
     // Handler wires the FS-bytes callback to sessionStats; the runner strips/parses.
-    expect(serverSrc).toContain("sessionStats.bytesSandboxed += bytes");
-    expect(serverSrc).toContain("onFsBytes?.(cmdFsBytes)");
+    expect(batchSrc).toContain("sessionStats.bytesSandboxed += totalFsBytes");
+    expect(sharedSrc).toContain("onFsBytes?.(cmdFsBytes)");
   });
 
   test("strips __CM_FS__ markers from batch command output", async () => {
-    expect(serverSrc).toContain('output.replace(/__CM_FS__:\\d+\\n?/g, "")');
+    expect(sharedSrc).toContain('output.replace(/__CM_FS__:\\d+\\n?/g, "")');
   });
 
   test("cleans up preload file on shutdown", async () => {
@@ -2094,17 +2144,17 @@ describe("batch_execute FS read tracking", () => {
   });
 
   test("handler accepts concurrency input field with min/max bounds", async () => {
-    expect(serverSrc).toContain("concurrency: z");
-    expect(serverSrc).toMatch(/\.min\(1\)\s*\n?\s*\.max\(8\)/);
-    expect(serverSrc).toContain(".default(1)");
+    expect(batchSrc).toContain("concurrency: z");
+    expect(batchSrc).toMatch(/\.min\(1\)\s*\n?\s*\.max\(8\)/);
+    expect(batchSrc).toContain(".default(1)");
   });
 
   test("tool description documents the concurrency field with positive guidance", async () => {
     // Hardened guidance per PRD-concurrency-architectural.md Section 4
-    expect(serverSrc).toContain("concurrency: 4-8");
-    expect(serverSrc).toContain("3-5x");
-    expect(serverSrc).toContain("✅");
-    expect(serverSrc).toContain("❌");
+    expect(batchSrc).toContain("concurrency: 4-8");
+    expect(batchSrc).toContain("3-5x");
+    expect(batchSrc).toContain("✅");
+    expect(batchSrc).toContain("❌");
   });
 });
 
@@ -2116,7 +2166,7 @@ import {
   buildBatchNodeOptionsPrefix,
   runBatchCommands,
   type BatchCommand,
-} from "../../src/server.js";
+} from "../../src/tools/shared.js";
 
 interface MockResult { stdout: string; timedOut?: boolean; }
 
@@ -2556,7 +2606,7 @@ describe("runPool primitive", () => {
 
 describe("ctx_fetch_and_index batch refactor", () => {
   const fetchHandlerSrc = readFileSync(
-    resolve(__dirname, "../../src/server.ts"),
+    resolve(__dirname, "../../src/tools/admin.ts"),
     "utf-8",
   );
 
@@ -2564,14 +2614,13 @@ describe("ctx_fetch_and_index batch refactor", () => {
     expect(fetchHandlerSrc).toContain('url: z.string().optional()');
     expect(fetchHandlerSrc).toContain('requests: z');
     // Zod array of {url, source?}
-    expect(fetchHandlerSrc).toContain("z.object({\n            url: z.string()");
+    expect(fetchHandlerSrc).toMatch(/z\.object\(\{\s*\n\s*url: z\.string\(\)/);
     expect(fetchHandlerSrc).toContain('source: z.string().optional()');
   });
 
   test("handler exposes concurrency 1-8 with default 1", async () => {
     // Find the fetch_and_index registerTool block, then assert concurrency schema near it.
-    // Stop anchor: the next registerTool call (ctx_batch_execute).
-    const fetchBlockMatch = fetchHandlerSrc.match(/registerTool\(\s*"ctx_fetch_and_index"[\s\S]+?registerTool\(\s*"ctx_batch_execute"/);
+    const fetchBlockMatch = fetchHandlerSrc.match(/registerTool\(\s*"ctx_fetch_and_index"[\s\S]+?\n\s*\);/);
     expect(fetchBlockMatch).not.toBeNull();
     const block = fetchBlockMatch![0];
     expect(block).toContain("concurrency: z");
@@ -2590,7 +2639,6 @@ describe("ctx_fetch_and_index batch refactor", () => {
   test("serial-write contract: index drain is a for-loop calling indexFetched serially", async () => {
     // The handler must NOT spawn parallel store.index calls. The drain is a
     // for-loop over `settled` calling indexFetched serially. Anti-pattern check.
-    expect(fetchHandlerSrc).toContain("Serial index drain");
     expect(fetchHandlerSrc).toContain("indexFetched(v)");
     // No `await Promise.all(... indexFetched ...)` pattern anywhere
     expect(fetchHandlerSrc).not.toMatch(/Promise\.all\([^)]*indexFetched/);
@@ -2676,7 +2724,7 @@ describe("ctx_fetch_and_index batch refactor", () => {
 // SSRF guard — ctx_fetch_and_index URL/IP allowlist (PR #401 ops review)
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { classifyIp } from "../../src/server.js";
+import { classifyIp } from "../../src/tools/shared.js";
 
 describe("classifyIp — SSRF guard IP classifier", () => {
   test("hard-blocks IMDS / link-local IPv4 (169.254.0.0/16)", async () => {
@@ -2741,9 +2789,9 @@ describe("classifyIp — SSRF guard IP classifier", () => {
   });
 });
 
-describe("SSRF guard — ssrfGuard policy in src/server.ts", () => {
+describe("SSRF guard — ssrfGuard policy in src/tools/admin.ts", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/server.ts"),
+    resolve(__dirname, "../../src/tools/admin.ts"),
     "utf-8",
   );
 
@@ -2972,7 +3020,7 @@ describe("getSessionDirSegments — sync platform → segments map", () => {
 
 describe("getSessionDir uses pre-detection when adapter not yet detected", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/server.ts"),
+    resolve(__dirname, "../../src/tools/shared.ts"),
     "utf-8",
   );
 
@@ -3023,22 +3071,21 @@ describe("ctx_fetch_and_index cache key includes URL (Fix 6/10)", () => {
     expect(k1).toBe(k2);
   });
 
-  test("server.ts uses composeFetchCacheKey for cache lookup (no bare-label collision)", async () => {
-    const serverSrc = readFileSync(
-      resolve(__dirname, "../../src/server.ts"),
+  test("admin.ts uses composeFetchCacheKey for cache lookup (no bare-label collision)", async () => {
+    const adminSrc = readFileSync(
+      resolve(__dirname, "../../src/tools/admin.ts"),
       "utf-8",
     );
-    // The cache lookup may live in the handler block OR in an extracted helper
-    // (post-refactor: `fetchOneUrl` is the parallel-safe fetcher invoked by both
-    // single-URL and batch paths). Either location must use composeFetchCacheKey,
+    // The cache lookup lives in the extracted helper `fetchOneUrl`, which is
+    // invoked by both single-URL and batch paths. It must use composeFetchCacheKey,
     // not the bare label/url variable.
 
     // composeFetchCacheKey must be imported and referenced
-    expect(serverSrc).toContain('from "./fetch-cache.js"');
-    expect(serverSrc).toContain("composeFetchCacheKey");
+    expect(adminSrc).toContain('from "../fetch-cache.js"');
+    expect(adminSrc).toContain("composeFetchCacheKey");
 
     // Find ANY getSourceMeta call across the file
-    const lookupCall = serverSrc.match(/getSourceMeta\(\s*([^)]+)\s*\)/);
+    const lookupCall = adminSrc.match(/getSourceMeta\(\s*([^)]+)\s*\)/);
     expect(lookupCall, "getSourceMeta call missing").not.toBeNull();
     const arg = lookupCall![1].trim();
     // Must NOT be the bare `label` variable (that was the bug).

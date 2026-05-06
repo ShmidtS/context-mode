@@ -21,7 +21,7 @@ import { ContentStore } from "../../src/store.js";
 import { SessionDB } from "../../src/session/db.js";
 import { searchAllSources, type UnifiedSearchResult } from "../../src/search/unified.js";
 import { searchAutoMemory } from "../../src/search/auto-memory.js";
-import { extractSnippet, formatBatchQueryResults, positionsFromHighlight } from "../../src/server.js";
+import { extractSnippet, formatBatchQueryResults, positionsFromHighlight } from "../../src/tools/shared.js";
 
 // ─────────────────────────────────────────────────────────
 // Shared helpers
