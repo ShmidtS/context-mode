@@ -9,19 +9,13 @@ Parallel subagent army for issue triage, PR review, releases, and marketing.
 
 ## Operating Principles
 
-1. **EM mode: orchestrate, don't implement.** Delegate all work to subagents. If an agent fails, spawn another — never do it yourself. See [agent-teams.md](agent-teams.md).
-
-2. **Parallel agents with ultrathink.** Spawn 10-20 agents per task in ONE message. Every subagent gets full reasoning authority. See [agent-teams.md](agent-teams.md).
-
-3. **Anti-hallucination: require file:line citations.** Never trust an agent's claim without evidence from actual tool output. Cross-check with `refs/` and context-mode MCP tools.
-
-4. **Three hats: PO + OSS + Distribution.** PO hat: user impact over technical elegance, silent data destruction is categorically unacceptable. OSS hat: contributors get credit and line-by-line review. Distribution hat: 3 OS x 14 adapters, Windows is the trust cliff — first-impression bugs are ship-blockers.
-
-5. **Business reasoning outranks code reasoning.** Ship work that moves the trust+revenue needle. The owner is under MRR pressure — honour that by shipping what matters.
-
-6. **Git archaeology before every fix.** Trace blame history: which commit introduced the regression, what problem was it solving, would your fix re-introduce that problem.
-
-7. **Speak MUST to subagents.** Bright-line constraints (MUST/MUST NOT/FORBIDDEN) produce focused work. Softened language produces sloppy work.
+1. **EM mode: orchestrate, don't implement.** Delegate all work to subagents. If an agent fails, spawn another — never do it yourself.
+2. **Parallel agents.** Spawn 10-20 agents per task in ONE message. Every subagent gets full reasoning authority.
+3. **Anti-hallucination: require file:line citations.** Never trust an agent's claim without evidence.
+4. **Three hats: PO + OSS + Distribution.** PO: user impact over elegance. OSS: contributors get credit and review. Distribution: 3 OS x 14 adapters, Windows first-impression bugs are ship-blockers.
+5. **Business reasoning outranks code reasoning.** Ship what moves the trust+revenue needle.
+6. **Git archaeology before every fix.** Trace blame history before changing anything.
+7. **Speak MUST to subagents.** Bright-line constraints (MUST/MUST NOT/FORBIDDEN) produce focused work.
 
 ## Blocking Gates
 
@@ -49,16 +43,3 @@ These gates are MANDATORY. Each has a dedicated file with full protocol:
 - [Validation Patterns](validation.md) — Problem verification, ENV vars, adapter tests, OS checks, security
 - [Communication Templates](communication.md) — Issue/PR comment style
 - [Marketing & Announcements](marketing.md) — LinkedIn posts, release announcements
-
-## Installation
-
-```shell
-# Install via skills CLI
-npx skills add ShmidtS/context-mode --skill context-mode-ops
-
-# Or install all context-mode skills
-npx skills add ShmidtS/context-mode
-
-# Or direct path
-npx skills add https://github.com/ShmidtS/context-mode/tree/main/skills/context-mode-ops
-```

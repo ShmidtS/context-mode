@@ -3,9 +3,8 @@
 Mock at **system boundaries** only:
 
 - External APIs (payment, email, etc.)
-- Databases (sometimes - prefer test DB)
 - Time/randomness
-- File system (sometimes)
+- Databases/filesystem (only when no test stand-in exists)
 
 Don't mock:
 
