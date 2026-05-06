@@ -16,17 +16,17 @@ The MCP server layer is 100% portable and needs no adapter. Only the hook layer 
 
 ## Prerequisites
 
-All platforms (except Claude Code plugin install) require a global install:
+All platforms (except Claude Code plugin install) require a local install from source:
 
 ```bash
-npm install -g context-mode
+git clone https://github.com/ShmidtS/context-mode.git
+cd context-mode && npm install && npm run build
 ```
 
-This puts the `context-mode` binary in PATH, which is required for:
-- **MCP server:** `"command": "context-mode"` (replaces ephemeral `npx -y context-mode`)
-- **Hook dispatcher:** `context-mode hook <platform> <event>` (replaces `node ./node_modules/...` paths)
-- **Utility commands:** `context-mode doctor`, `context-mode upgrade`
-- **Persistent upgrades:** `ctx-upgrade` updates the global binary in-place
+This puts the `context-mode` binary in PATH (via `npm link` or `node ./start.mjs`), which is required for:
+- **MCP server:** `"command": "context-mode"` or `"command": "node /path/to/context-mode/start.mjs"`
+- **Hook dispatcher:** `node ./hooks/<platform>.mjs` or `context-mode hook <platform> <event>`
+- **Utility commands:** `node ./cli.mjs doctor`, `node ./cli.mjs upgrade`
 
 ---
 

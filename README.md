@@ -26,11 +26,14 @@ Every MCP tool call dumps raw data into your context window. A Playwright snapsh
 /plugin install context-mode@context-mode
 ```
 
-**All platforms** (npm global):
+**All platforms** (from source):
 
 ```bash
-npm install -g context-mode
+git clone https://github.com/ShmidtS/context-mode.git
+cd context-mode && npm install && npm run build
 ```
+
+Then link the binary or use `node ./start.mjs` as the MCP server command.
 
 See [docs/platform-support.md](docs/platform-support.md) for platform-specific setup (Cursor, Copilot, Gemini CLI, Codex, OpenCode, Zed, and 8 more).
 
