@@ -425,10 +425,10 @@ describe("Edge cases and hardening", () => {
     );
 
     // These queries with special chars should not throw
-    assert.doesNotThrow(async () => await store.searchWithFallback('TypeError "line 42"', 3));
-    assert.doesNotThrow(async () => await store.searchWithFallback("error (module)", 3));
-    assert.doesNotThrow(async () => await store.searchWithFallback("stack* trace", 3));
-    assert.doesNotThrow(async () => await store.searchWithFallback("NOT:something", 3));
+    await assert.doesNotReject(async () => await store.searchWithFallback('TypeError "line 42"', 3));
+    await assert.doesNotReject(async () => await store.searchWithFallback("error (module)", 3));
+    await assert.doesNotReject(async () => await store.searchWithFallback("stack* trace", 3));
+    await assert.doesNotReject(async () => await store.searchWithFallback("NOT:something", 3));
 
     store.close();
   });
