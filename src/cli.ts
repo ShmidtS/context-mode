@@ -144,7 +144,7 @@ export function toUnixPath(p: string): string {
  * Windows-safe npm execution. On Windows:
  * - "npm" → "npm.cmd" (Node won't resolve via PATHEXT in execFile)
  * - shell: true required (Node v20+ CVE-2024-27980 mitigation)
- * See: https://github.com/mksglu/context-mode/issues/344
+ * See: https://github.com/ShmidtS/context-mode/issues/344
  */
 const isWin = process.platform === "win32";
 
@@ -709,10 +709,10 @@ async function upgrade() {
   const localVersion = getLocalVersion();
   const tmpDir = join(tmpdir(), `context-mode-upgrade-${Date.now()}`);
 
-  s.start("Cloning mksglu/context-mode");
+  s.start("Cloning ShmidtS/context-mode");
   try {
     execFileSync(
-      "git", ["clone", "--depth", "1", "https://github.com/mksglu/context-mode.git", tmpDir],
+      "git", ["clone", "--depth", "1", "https://github.com/ShmidtS/context-mode.git", tmpDir],
       { stdio: "pipe", timeout: 30000 },
     );
     s.stop("Downloaded");

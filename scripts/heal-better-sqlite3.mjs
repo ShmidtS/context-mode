@@ -22,7 +22,7 @@
  * function never throws. Caller will fail naturally on first DB open if
  * heal could not produce a working binding.
  *
- * @see https://github.com/mksglu/context-mode/issues/408
+ * @see https://github.com/ShmidtS/context-mode/issues/408
  */
 
 import { existsSync } from "node:fs";

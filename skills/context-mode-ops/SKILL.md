@@ -289,11 +289,11 @@ Follow [communication.md](communication.md) — be warm, technical, and always p
 
 ```shell
 # Install via skills CLI
-npx skills add mksglu/context-mode --skill context-mode-ops
+npx skills add ShmidtS/context-mode --skill context-mode-ops
 
 # Or install all context-mode skills
-npx skills add mksglu/context-mode
+npx skills add ShmidtS/context-mode
 
 # Or direct path
-npx skills add https://github.com/mksglu/context-mode/tree/main/skills/context-mode-ops
+npx skills add https://github.com/ShmidtS/context-mode/tree/main/skills/context-mode-ops
 ```

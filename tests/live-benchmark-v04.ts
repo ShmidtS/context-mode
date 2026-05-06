@@ -131,14 +131,14 @@ async function main() {
   // Test: npm ls (package tree)
   const rawNpmLs = await executor.execute({
     language: "shell",
-    code: "cd /Users/mksglu/Server/Mert/context-mode-claude-code-plugin/context-mode && npm ls 2>/dev/null || true",
+    code: "cd /Users/ShmidtS/Server/Mert/context-mode-claude-code-plugin/context-mode && npm ls 2>/dev/null || true",
   });
   const rawNpmLsBytes = Buffer.byteLength(rawNpmLs.stdout);
 
   await benchmark("execute", "npm ls → dependency summary", rawNpmLsBytes, async () => {
     const result = await executor.execute({
       language: "shell",
-      code: 'cd /Users/mksglu/Server/Mert/context-mode-claude-code-plugin/context-mode && echo "Dependencies: $(npm ls --depth=0 2>/dev/null | grep -c "├\\|└") direct, $(npm ls --all 2>/dev/null | wc -l | tr -d " ") total"',
+      code: 'cd /Users/ShmidtS/Server/Mert/context-mode-claude-code-plugin/context-mode && echo "Dependencies: $(npm ls --depth=0 2>/dev/null | grep -c "├\\|└") direct, $(npm ls --all 2>/dev/null | wc -l | tr -d " ") total"',
     });
     return { output: result.stdout.trim(), details: "dep summary" };
   });

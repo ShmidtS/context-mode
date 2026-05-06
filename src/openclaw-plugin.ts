@@ -738,7 +738,7 @@ export default {
         // No-op: session continuity is handled by before_compaction / after_compaction hooks.
         // Returning ownsCompaction: false + compacted: false lets the host platform (OpenClaw)
         // manage conversation truncation, preserving Anthropic thinking/redacted_thinking blocks.
-        // See: https://github.com/mksglu/context-mode/issues/191
+        // See: https://github.com/ShmidtS/context-mode/issues/191
         return { ok: true, compacted: false };
       },
     }));

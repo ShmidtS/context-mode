@@ -170,7 +170,7 @@ function isSyntheticMessage(text: string): boolean {
  * so KILO_PID wins the iteration.
  *
  * Pre-fix version was `return process.env.KILO_PID ? "kilo" : "opencode";` —
- * surfaced by github.com/mksglu/context-mode/pull/376 (mikij). Full symmetric
+ * surfaced by github.com/ShmidtS/context-mode/pull/376 (mikij). Full symmetric
  * fix: also actively check opencode env vars instead of blind fallback.
  */
 function getPlatform(): AdapterPlatformType {

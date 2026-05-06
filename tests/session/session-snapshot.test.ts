@@ -173,12 +173,12 @@ describe("Slice 7: Rules Deduplication", () => {
 describe("Slice 8: Environment", () => {
   test("buildResumeSnapshot with cwd event includes environment", () => {
     const events: StoredEvent[] = [
-      makeEvent({ type: "cwd", category: "cwd", data: "/Users/mksglu/project", priority: 2 }),
+      makeEvent({ type: "cwd", category: "cwd", data: "/Users/ShmidtS/project", priority: 2 }),
     ];
     const xml = buildResumeSnapshot(events);
     assert.ok(xml.includes("<environment>"), "should include <environment>");
     assert.ok(xml.includes("cwd:"), "should include cwd label");
-    assert.ok(xml.includes("/Users/mksglu/project"), "should include cwd path");
+    assert.ok(xml.includes("/Users/ShmidtS/project"), "should include cwd path");
     assert.ok(xml.includes("</environment>"), "should close environment");
   });
 
@@ -438,7 +438,7 @@ describe("Edge Cases", () => {
       makeEvent({ type: "task", category: "task", data: JSON.stringify({ subject: "Implement session continuity" }), priority: 1 }),
       makeEvent({ type: "rule", category: "rule", data: "CLAUDE.md: Never set Claude as git author", priority: 1 }),
       makeEvent({ type: "decision", category: "decision", data: "use ctx- prefix, not cm-", priority: 2 }),
-      makeEvent({ type: "cwd", category: "cwd", data: "/Users/mksglu/project", priority: 2 }),
+      makeEvent({ type: "cwd", category: "cwd", data: "/Users/ShmidtS/project", priority: 2 }),
       makeEvent({ type: "git", category: "git", data: "branch", priority: 2 }),
       makeEvent({ type: "env", category: "env", data: "nvm use 20", priority: 2 }),
       makeEvent({ type: "error_tool", category: "error", data: "Push rejected", priority: 2 }),
