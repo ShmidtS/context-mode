@@ -335,7 +335,7 @@ describe("CursorAdapter", () => {
       };
 
       for (const [capability, script] of Object.entries(capabilityToScript)) {
-        const enabled = (adapter.capabilities as Record<string, unknown>)[capability];
+        const enabled = (adapter.capabilities as unknown as Record<string, unknown>)[capability];
         if (enabled === true) {
           expect(
             existsSync(join(hooksDir, script)),

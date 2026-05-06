@@ -1,5 +1,3 @@
-import { buildNodeCommand } from "../types.js";
-
 /**
  * adapters/claude-code/hooks — Claude Code hook definitions and matchers.
  *
@@ -17,6 +15,8 @@ import { buildNodeCommand } from "../types.js";
  *   - Input: JSON on stdin
  *   - Output: JSON on stdout (or empty for passthrough)
  */
+
+import { createIsContextModeHook, createBuildHookCommand } from "../hooks-helpers.js";
 
 // ─────────────────────────────────────────────────────────
 // Hook type constants
@@ -119,36 +119,22 @@ export const OPTIONAL_HOOKS: HookType[] = [
   HOOK_TYPES.USER_PROMPT_SUBMIT,
 ];
 
-/**
- * Check if a hook entry points to a context-mode hook script.
- * Matches both legacy format (node .../pretooluse.mjs) and
- * CLI dispatcher format (context-mode hook claude-code pretooluse).
- */
-export function isContextModeHook(
-  entry: { hooks?: Array<{ command?: string }> },
-  hookType: HookType,
-): boolean {
-  const scriptName = HOOK_SCRIPTS[hookType];
-  const cliCommand = buildHookCommand(hookType);
-  return (
-    entry.hooks?.some((h) =>
-      h.command?.includes(scriptName) || h.command?.includes(cliCommand),
-    ) ?? false
-  );
-}
+// ─────────────────────────────────────────────────────────
+// Factory-generated helpers
+// ─────────────────────────────────────────────────────────
 
-/**
- * Build the hook command string for a given hook type.
- * Uses process.execPath + forward slashes to avoid PATH issues and MSYS
- * path mangling on Windows (#369, #372).
- * Falls back to CLI dispatcher if pluginRoot is not provided.
- */
+const buildHookCommandForPlatform = createBuildHookCommand<HookType>(
+  HOOK_SCRIPTS,
+  "claude-code",
+);
+
+export const isContextModeHook = createIsContextModeHook<HookType>(
+  HOOK_SCRIPTS,
+  (hookType) => buildHookCommandForPlatform(hookType),
+);
+
 export function buildHookCommand(hookType: HookType, pluginRoot?: string): string {
-  if (pluginRoot) {
-    const scriptName = HOOK_SCRIPTS[hookType];
-    return buildNodeCommand(`${pluginRoot}/hooks/${scriptName}`);
-  }
-  return `context-mode hook claude-code ${hookType.toLowerCase()}`;
+  return buildHookCommandForPlatform(hookType, pluginRoot);
 }
 
 /**

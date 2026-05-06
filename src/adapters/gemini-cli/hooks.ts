@@ -1,5 +1,3 @@
-import { buildNodeCommand } from "../types.js";
-
 /**
  * adapters/gemini-cli/hooks — Gemini CLI hook definitions and matchers.
  *
@@ -20,6 +18,8 @@ import { buildNodeCommand } from "../types.js";
  *     to the prompt (hookRunner.ts:183-197). Equivalent to Claude Code's
  *     UserPromptSubmit for session-continuity capture.
  */
+
+import { createIsContextModeHook, createBuildHookCommand } from "../hooks-helpers.js";
 
 // ─────────────────────────────────────────────────────────
 // Hook type constants
@@ -65,33 +65,21 @@ export const OPTIONAL_HOOKS: HookType[] = [
   HOOK_TYPES.PRE_COMPRESS,
 ];
 
-/**
- * Check if a hook entry points to a context-mode hook script.
- * Matches both legacy format (node .../beforetool.mjs) and
- * CLI dispatcher format (context-mode hook gemini-cli beforetool).
- */
-export function isContextModeHook(
-  entry: { hooks?: Array<{ command?: string }> },
-  hookType: HookType,
-): boolean {
-  const scriptName = HOOK_SCRIPTS[hookType];
-  const cliCommand = buildHookCommand(hookType);
-  return (
-    entry.hooks?.some((h) =>
-      h.command?.includes(scriptName) || h.command?.includes(cliCommand),
-    ) ?? false
-  );
-}
+// ─────────────────────────────────────────────────────────
+// Factory-generated helpers
+// ─────────────────────────────────────────────────────────
 
-/**
- * Build the hook command string for a given hook type.
- * Uses absolute node path to avoid PATH issues (homebrew, nvm, volta, etc.).
- * Falls back to CLI dispatcher if pluginRoot is not provided.
- */
+const buildHookCommandForPlatform = createBuildHookCommand<HookType>(
+  HOOK_SCRIPTS,
+  "gemini-cli",
+  "gemini-cli",
+);
+
+export const isContextModeHook = createIsContextModeHook<HookType>(
+  HOOK_SCRIPTS,
+  (hookType) => buildHookCommandForPlatform(hookType),
+);
+
 export function buildHookCommand(hookType: HookType, pluginRoot?: string): string {
-  const scriptName = HOOK_SCRIPTS[hookType];
-  if (pluginRoot && scriptName) {
-    return buildNodeCommand(`${pluginRoot}/hooks/${scriptName}`);
-  }
-  return `context-mode hook gemini-cli ${hookType.toLowerCase()}`;
+  return buildHookCommandForPlatform(hookType, pluginRoot);
 }

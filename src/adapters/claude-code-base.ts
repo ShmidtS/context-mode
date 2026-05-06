@@ -16,6 +16,7 @@
  */
 
 import { BaseAdapter } from "./base.js";
+import { normalizeSessionSource } from "./shared.js";
 
 import type {
   PreToolUseEvent,
@@ -90,26 +91,9 @@ export abstract class ClaudeCodeBaseAdapter extends BaseAdapter {
 
   parseSessionStartInput(raw: unknown): SessionStartEvent {
     const input = raw as ClaudeCodeWireInput;
-    const rawSource = input.source ?? "startup";
-
-    let source: SessionStartEvent["source"];
-    switch (rawSource) {
-      case "compact":
-        source = "compact";
-        break;
-      case "resume":
-        source = "resume";
-        break;
-      case "clear":
-        source = "clear";
-        break;
-      default:
-        source = "startup";
-    }
-
     return {
       sessionId: this.extractSessionId(input),
-      source,
+      source: normalizeSessionSource(input.source),
       projectDir: process.env[this.projectDirEnvVar] ?? process.cwd(),
       raw,
     };

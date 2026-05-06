@@ -112,6 +112,7 @@ describe("formatReport — Bugs #5/#6/#7/#8", () => {
         autoMemoryCount: 18,
         autoMemoryProjects: 6,
         autoMemoryByPrefix: { user: 4, feedback: 7, project: 5, reference: 2 },
+        categoryCounts: {},
       },
     });
     expect(text).toMatch(/Auto-memory/);
@@ -129,6 +130,7 @@ describe("formatReport — Bugs #5/#6/#7/#8", () => {
         autoMemoryCount: 22,
         autoMemoryProjects: 5,
         autoMemoryByPrefix: { project: 11, memory: 6, feedback: 3, user: 1, reference: 1 },
+        categoryCounts: {},
       },
     });
     // Must have bar characters in the auto-memory block.

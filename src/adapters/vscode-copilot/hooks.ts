@@ -1,5 +1,3 @@
-import { buildNodeCommand } from "../types.js";
-
 /**
  * adapters/vscode-copilot/hooks — VS Code Copilot hook definitions and matchers.
  *
@@ -17,6 +15,8 @@ import { buildNodeCommand } from "../types.js";
  *   - Output: JSON on stdout (or empty for passthrough)
  *   - Preview status — API may change
  */
+
+import { createIsContextModeHook, createBuildHookCommand } from "../hooks-helpers.js";
 
 // ─────────────────────────────────────────────────────────
 // Hook type constants
@@ -60,42 +60,22 @@ export const OPTIONAL_HOOKS: HookType[] = [
   HOOK_TYPES.PRE_COMPACT,
 ];
 
-/**
- * Check if a hook entry points to a context-mode hook script.
- * Matches both legacy format (node .../pretooluse.mjs) and
- * CLI dispatcher format (context-mode hook vscode-copilot pretooluse).
- */
-export function isContextModeHook(
-  entry: { hooks?: Array<{ command?: string }> },
-  hookType: HookType,
-): boolean {
-  const scriptName = HOOK_SCRIPTS[hookType];
-  if (!scriptName) return false;
-  const cliCommand = buildHookCommand(hookType);
-  return (
-    entry.hooks?.some((h) =>
-      h.command?.includes(scriptName) || h.command?.includes(cliCommand),
-    ) ?? false
-  );
-}
+// ─────────────────────────────────────────────────────────
+// Factory-generated helpers
+// ─────────────────────────────────────────────────────────
 
-/**
- * Build the hook command string for a given hook type.
- * Uses absolute node path to avoid PATH issues (homebrew, nvm, volta, etc.).
- * Falls back to CLI dispatcher if pluginRoot is not provided.
- */
+const buildHookCommandForPlatform = createBuildHookCommand<HookType>(
+  HOOK_SCRIPTS,
+  "vscode-copilot",
+  "vscode-copilot",
+  true, // throwOnMissingScript
+);
+
+export const isContextModeHook = createIsContextModeHook<HookType>(
+  HOOK_SCRIPTS,
+  (hookType) => buildHookCommandForPlatform(hookType),
+);
+
 export function buildHookCommand(hookType: HookType, pluginRoot?: string): string {
-  const scriptName = HOOK_SCRIPTS[hookType];
-  if (!scriptName) {
-    throw new Error(`No script defined for hook type: ${hookType}`);
-  }
-  if (pluginRoot) {
-    // v1.0.107 fix — was `${pluginRoot}/hooks/${scriptName}` which resolved to
-    // the Claude-Code generic hook (`hooks/pretooluse.mjs`) instead of the
-    // VSCode-specific wrapper at `hooks/vscode-copilot/pretooluse.mjs`. JetBrains
-    // adapter already had the correct subdir (jetbrains-copilot/hooks.ts:98)
-    // so this brings VSCode to parity.
-    return buildNodeCommand(`${pluginRoot}/hooks/vscode-copilot/${scriptName}`);
-  }
-  return `context-mode hook vscode-copilot ${hookType.toLowerCase()}`;
+  return buildHookCommandForPlatform(hookType, pluginRoot);
 }

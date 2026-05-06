@@ -34,144 +34,45 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // 1. Non-zero Exit Code Classification (soft-fail)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ── Parameterized classifyNonZeroExit specs ─────────────────
+
+interface ExitClassifySpec {
+  desc: string;
+  input: { language: string; exitCode: number; stdout: string; stderr: string };
+  isError: boolean;
+  outputContains?: string[];
+  outputNotContains?: string[];
+  outputIs?: string;
+  outputMatches?: RegExp[];
+}
+
+const exitClassifySpecs: ExitClassifySpec[] = [
+  // Soft-fail: shell + exit 1 + stdout present
+  { desc: "shell exit 1 with stdout → not an error", input: { language: "shell", exitCode: 1, stdout: "file1.ts:10: writeRouting\nfile2.ts:20: writeRouting", stderr: "" }, isError: false, outputIs: "file1.ts:10: writeRouting\nfile2.ts:20: writeRouting" },
+  { desc: "shell exit 1 with empty stdout → real error", input: { language: "shell", exitCode: 1, stdout: "", stderr: "" }, isError: true },
+  { desc: "shell exit 1 with whitespace-only stdout → real error", input: { language: "shell", exitCode: 1, stdout: "   \n  ", stderr: "" }, isError: true },
+  // Hard errors: exit code >= 2
+  { desc: "shell exit 2 (grep bad regex) → always error", input: { language: "shell", exitCode: 2, stdout: "", stderr: "grep: Invalid regular expression" }, isError: true, outputContains: ["Exit code: 2", "grep: Invalid regular expression"] },
+  { desc: "shell exit 127 (command not found) → always error", input: { language: "shell", exitCode: 127, stdout: "", stderr: "bash: nonexistent: command not found" }, isError: true, outputContains: ["Exit code: 127"] },
+  // Non-shell languages: always error
+  { desc: "javascript exit 1 with stdout → still an error", input: { language: "javascript", exitCode: 1, stdout: "some output before crash", stderr: "TypeError: x is not a function" }, isError: true, outputContains: ["Exit code: 1"] },
+  { desc: "python exit 1 with stdout → still an error", input: { language: "python", exitCode: 1, stdout: "partial output", stderr: "Traceback (most recent call last):" }, isError: true },
+  { desc: "typescript exit 1 with stdout → still an error", input: { language: "typescript", exitCode: 1, stdout: "output", stderr: "" }, isError: true },
+  // Output format
+  { desc: "soft-fail output is clean stdout (no 'Exit code:' prefix)", input: { language: "shell", exitCode: 1, stdout: "matched line", stderr: "" }, isError: false, outputNotContains: ["Exit code:"], outputIs: "matched line" },
+  { desc: "hard error output includes exit code, stdout, and stderr", input: { language: "shell", exitCode: 2, stdout: "partial", stderr: "error msg" }, isError: true, outputContains: ["Exit code: 2", "partial", "error msg"] },
+  { desc: "hard-fail with empty stdout still forwards stderr", input: { language: "shell", exitCode: 1, stdout: "", stderr: "command not found" }, isError: true, outputContains: ["Exit code: 1", "command not found"] },
+  { desc: "hard-fail output has labeled 'stdout:' and 'stderr:' sections", input: { language: "node", exitCode: 137, stdout: "S", stderr: "E" }, isError: true, outputMatches: [/stdout:\s*\nS/, /stderr:\s*\nE/] },
+];
+
 describe("Non-zero Exit Code Classification", () => {
-  // ── Soft-fail: shell + exit 1 + stdout present ──
-
-  test("shell exit 1 with stdout → not an error (grep no-match pattern)", async () => {
-    const result = classifyNonZeroExit({
-      language: "shell",
-      exitCode: 1,
-      stdout: "file1.ts:10: writeRouting\nfile2.ts:20: writeRouting",
-      stderr: "",
-    });
-    expect(result.isError).toBe(false);
-    expect(result.output).toBe("file1.ts:10: writeRouting\nfile2.ts:20: writeRouting");
-  });
-
-  test("shell exit 1 with empty stdout → real error", async () => {
-    const result = classifyNonZeroExit({
-      language: "shell",
-      exitCode: 1,
-      stdout: "",
-      stderr: "",
-    });
-    expect(result.isError).toBe(true);
-  });
-
-  test("shell exit 1 with whitespace-only stdout → real error", async () => {
-    const result = classifyNonZeroExit({
-      language: "shell",
-      exitCode: 1,
-      stdout: "   \n  ",
-      stderr: "",
-    });
-    expect(result.isError).toBe(true);
-  });
-
-  // ── Hard errors: exit code >= 2 ──
-
-  test("shell exit 2 (grep bad regex) → always error", async () => {
-    const result = classifyNonZeroExit({
-      language: "shell",
-      exitCode: 2,
-      stdout: "",
-      stderr: "grep: Invalid regular expression",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.output).toContain("Exit code: 2");
-    expect(result.output).toContain("grep: Invalid regular expression");
-  });
-
-  test("shell exit 127 (command not found) → always error", async () => {
-    const result = classifyNonZeroExit({
-      language: "shell",
-      exitCode: 127,
-      stdout: "",
-      stderr: "bash: nonexistent: command not found",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.output).toContain("Exit code: 127");
-  });
-
-  // ── Non-shell languages: always error ──
-
-  test("javascript exit 1 with stdout → still an error (not shell)", async () => {
-    const result = classifyNonZeroExit({
-      language: "javascript",
-      exitCode: 1,
-      stdout: "some output before crash",
-      stderr: "TypeError: x is not a function",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.output).toContain("Exit code: 1");
-  });
-
-  test("python exit 1 with stdout → still an error (not shell)", async () => {
-    const result = classifyNonZeroExit({
-      language: "python",
-      exitCode: 1,
-      stdout: "partial output",
-      stderr: "Traceback (most recent call last):",
-    });
-    expect(result.isError).toBe(true);
-  });
-
-  test("typescript exit 1 with stdout → still an error (not shell)", async () => {
-    const result = classifyNonZeroExit({
-      language: "typescript",
-      exitCode: 1,
-      stdout: "output",
-      stderr: "",
-    });
-    expect(result.isError).toBe(true);
-  });
-
-  // ── Output format ──
-
-  test("soft-fail output is clean stdout (no 'Exit code:' prefix)", async () => {
-    const result = classifyNonZeroExit({
-      language: "shell",
-      exitCode: 1,
-      stdout: "matched line",
-      stderr: "",
-    });
-    expect(result.output).not.toContain("Exit code:");
-    expect(result.output).toBe("matched line");
-  });
-
-  test("hard error output includes exit code, stdout, and stderr", () => {
-    const result = classifyNonZeroExit({
-      language: "shell",
-      exitCode: 2,
-      stdout: "partial",
-      stderr: "error msg",
-    });
-    expect(result.output).toContain("Exit code: 2");
-    expect(result.output).toContain("partial");
-    expect(result.output).toContain("error msg");
-  });
-
-  test("hard-fail with empty stdout still forwards stderr in output", async () => {
-    const result = classifyNonZeroExit({
-      language: "shell",
-      exitCode: 1,
-      stdout: "",
-      stderr: "command not found",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.output).toContain("Exit code: 1");
-    expect(result.output).toContain("command not found");
-  });
-
-  test("hard-fail output has labeled 'stdout:' and 'stderr:' sections", async () => {
-    const result = classifyNonZeroExit({
-      language: "node",
-      exitCode: 137,
-      stdout: "S",
-      stderr: "E",
-    });
-    expect(result.output).toMatch(/stdout:\s*\nS/);
-    expect(result.output).toMatch(/stderr:\s*\nE/);
+  test.each(exitClassifySpecs)("$desc", ({ input, isError, outputContains, outputNotContains, outputIs, outputMatches }) => {
+    const result = classifyNonZeroExit(input);
+    expect(result.isError).toBe(isError);
+    if (outputContains) for (const s of outputContains) expect(result.output).toContain(s);
+    if (outputNotContains) for (const s of outputNotContains) expect(result.output).not.toContain(s);
+    if (outputIs !== undefined) expect(result.output).toBe(outputIs);
+    if (outputMatches) for (const re of outputMatches) expect(result.output).toMatch(re);
   });
 });
 
@@ -1225,7 +1126,7 @@ describe("ctx_execute_file: CONTEXT_MODE_PROJECT_DIR env cascade", () => {
   function spawnServerCtxModeOnly(projectDirEnv: string): ChildProcess {
     // Strip every CLAUDE_*-style projectDir signal so the executor MUST
     // fall back through the env cascade to CONTEXT_MODE_PROJECT_DIR.
-    const env = { ...process.env, CONTEXT_MODE_DISABLE_VERSION_CHECK: "1" };
+    const env: Record<string, string | undefined> = { ...process.env, CONTEXT_MODE_DISABLE_VERSION_CHECK: "1" };
     delete env.CLAUDE_PROJECT_DIR;
     delete env.GEMINI_PROJECT_DIR;
     delete env.VSCODE_CWD;

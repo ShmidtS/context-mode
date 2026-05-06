@@ -16,7 +16,7 @@ export default defineConfig({
         // for current test count (~2450 tests in ~60s vs ~43s with 3 workers).
         singleFork: isCI,
       },
-    },
+    } as any,
     // Non-CI: allow limited parallelism for speed (3 workers = ~2.8x speedup).
     maxWorkers: isCI ? 1 : 3,
     // Hook subprocess tests (spawnSync + better-sqlite3 native addon) can

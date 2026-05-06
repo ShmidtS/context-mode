@@ -1,13 +1,12 @@
 /**
  * adapters/antigravity — Google Antigravity platform adapter.
  *
- * Implements HookAdapter for Antigravity's MCP-only paradigm.
+ * Extends McpOnlyBaseAdapter (MCP-only, no hooks).
  *
- * Antigravity hook specifics:
- *   - NO hook support (MCP-only, same as Codex CLI)
+ * Antigravity specifics:
+ *   - NO hook support (MCP-only)
  *   - Config: ~/.gemini/antigravity/mcp_config.json (JSON format)
  *   - MCP: full support via mcpServers in mcp_config.json
- *   - All capabilities are false — MCP is the only integration path
  *   - Session dir: ~/.gemini/context-mode/sessions/
  *   - Routing file: GEMINI.md (shared with Gemini CLI filename, different content)
  *
@@ -26,84 +25,22 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
-import { BaseAdapter } from "../base.js";
+import { McpOnlyBaseAdapter } from "../mcp-only-base.js";
 
 import type {
-  HookAdapter,
-  HookParadigm,
-  PlatformCapabilities,
   DiagnosticResult,
-  PreToolUseEvent,
-  PostToolUseEvent,
-  PreCompactEvent,
-  SessionStartEvent,
-  PreToolUseResponse,
-  PostToolUseResponse,
-  PreCompactResponse,
-  SessionStartResponse,
-  HookRegistration,
 } from "../types.js";
 
 // ─────────────────────────────────────────────────────────
 // Adapter implementation
 // ─────────────────────────────────────────────────────────
 
-export class AntigravityAdapter extends BaseAdapter implements HookAdapter {
+export class AntigravityAdapter extends McpOnlyBaseAdapter {
   constructor() {
     super([".gemini"]);
   }
 
   readonly name = "Antigravity";
-  readonly paradigm: HookParadigm = "mcp-only";
-
-  readonly capabilities: PlatformCapabilities = {
-    preToolUse: false,
-    postToolUse: false,
-    preCompact: false,
-    sessionStart: false,
-    canModifyArgs: false,
-    canModifyOutput: false,
-    canInjectSessionContext: false,
-  };
-
-  // ── Input parsing ──────────────────────────────────────
-  // Antigravity does not support hooks. These methods exist to satisfy the
-  // interface contract but will throw if called.
-
-  parsePreToolUseInput(_raw: unknown): PreToolUseEvent {
-    throw new Error("Antigravity does not support hooks");
-  }
-
-  parsePostToolUseInput(_raw: unknown): PostToolUseEvent {
-    throw new Error("Antigravity does not support hooks");
-  }
-
-  parsePreCompactInput(_raw: unknown): PreCompactEvent {
-    throw new Error("Antigravity does not support hooks");
-  }
-
-  parseSessionStartInput(_raw: unknown): SessionStartEvent {
-    throw new Error("Antigravity does not support hooks");
-  }
-
-  // ── Response formatting ────────────────────────────────
-  // Antigravity does not support hooks. Return undefined for all responses.
-
-  formatPreToolUseResponse(_response: PreToolUseResponse): unknown {
-    return undefined;
-  }
-
-  formatPostToolUseResponse(_response: PostToolUseResponse): unknown {
-    return undefined;
-  }
-
-  formatPreCompactResponse(_response: PreCompactResponse): unknown {
-    return undefined;
-  }
-
-  formatSessionStartResponse(_response: SessionStartResponse): unknown {
-    return undefined;
-  }
 
   // ── Configuration ──────────────────────────────────────
 
@@ -113,7 +50,7 @@ export class AntigravityAdapter extends BaseAdapter implements HookAdapter {
 
   /**
    * Antigravity nests under ~/.gemini/antigravity/. Always absolute.
-   * `_projectDir` accepted for interface symmetry but unused — home-rooted.
+   * `_projectDir` accepted to interface symmetry but unused — home-rooted.
    */
   getConfigDir(_projectDir?: string): string {
     return resolve(homedir(), ".gemini", "antigravity");
@@ -121,10 +58,6 @@ export class AntigravityAdapter extends BaseAdapter implements HookAdapter {
 
   getInstructionFiles(): string[] {
     return ["GEMINI.md"];
-  }
-
-  generateHookConfig(_pluginRoot: string): HookRegistration {
-    return {};
   }
 
   readSettings(): Record<string, unknown> | null {
@@ -199,22 +132,6 @@ export class AntigravityAdapter extends BaseAdapter implements HookAdapter {
     } catch {
       return "not installed";
     }
-  }
-
-  // ── Upgrade ────────────────────────────────────────────
-
-  configureAllHooks(_pluginRoot: string): string[] {
-    return [];
-  }
-
-
-
-  setHookPermissions(_pluginRoot: string): string[] {
-    return [];
-  }
-
-  updatePluginRegistry(_pluginRoot: string, _version: string): void {
-    // Antigravity plugin registry is managed via mcp_config.json
   }
 
   getRoutingInstructions(): string {

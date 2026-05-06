@@ -740,6 +740,7 @@ describe("PR-B: stats UX fixes", () => {
           autoMemoryCount: 0,
           autoMemoryProjects: 0,
           autoMemoryByPrefix: {},
+          categoryCounts: {},
         },
       });
 

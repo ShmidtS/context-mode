@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
 import { BaseAdapter } from "../base.js";
+import { normalizeSessionSource } from "../shared.js";
 
 import {
   HOOK_TYPES as KIRO_HOOK_TYPES,
@@ -131,9 +132,8 @@ export class KiroAdapter extends BaseAdapter implements HookAdapter {
   parseSessionStartInput(raw: unknown): SessionStartEvent {
     // Kiro maps agentSpawn -> SessionStart. Stdin shape mirrors codex/CC.
     const input = (raw ?? {}) as KiroCLIHookInput & { source?: string };
-    const source = (input.source as SessionStartEvent["source"]) ?? "startup";
     return {
-      source,
+      source: normalizeSessionSource(input.source),
       sessionId: `pid-${process.ppid}`,
       projectDir: input.cwd ?? process.cwd(),
       raw,

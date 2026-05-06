@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
 import { BaseAdapter } from "../base.js";
+import { normalizeSessionSource } from "../shared.js";
 
 import {
   buildNodeCommand,
@@ -117,26 +118,9 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
 
   parseSessionStartInput(raw: unknown): SessionStartEvent {
     const input = raw as CodexHookInput;
-    const rawSource = input.source ?? "startup";
-
-    let source: SessionStartEvent["source"];
-    switch (rawSource) {
-      case "compact":
-        source = "compact";
-        break;
-      case "resume":
-        source = "resume";
-        break;
-      case "clear":
-        source = "clear";
-        break;
-      default:
-        source = "startup";
-    }
-
     return {
       sessionId: this.extractSessionId(input),
-      source,
+      source: normalizeSessionSource(input.source),
       projectDir: this.getProjectDir(input),
       raw,
     };

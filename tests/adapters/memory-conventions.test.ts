@@ -26,121 +26,112 @@ import { ZedAdapter } from "../../src/adapters/zed/index.js";
 import { AntigravityAdapter } from "../../src/adapters/antigravity/index.js";
 import { OpenClawAdapter } from "../../src/adapters/openclaw/index.js";
 
-/**
- * Slice 3 — per-adapter memory/config conventions.
- *
- * Each adapter declares its own configDir, instructionFiles, memoryDir.
- * These are consumed by:
- *   - searchAutoMemory()  (auto-memory file scan)
- *   - ctx_search timeline (configDir for prior session lookup)
- *   - extract.ts isRule  (instruction file detection)
- */
+// ── Home-rooted adapter specs ─────────────────────────────
+
+type AdapterConstructor = new (...args: any[]) => ReturnType<typeof Object.create>;
+
+interface HomeRootedSpec {
+  name: string;
+  AdapterClass: AdapterConstructor;
+  constructorArgs?: unknown[];
+  configDir: string;
+  instructionFiles: string[];
+  memoryDir: string;
+}
+
+const xdgRoot =
+  process.platform === "win32"
+    ? join(homedir(), "AppData", "Roaming")
+    : join(homedir(), ".config");
+
+const homeRootedSpecs: HomeRootedSpec[] = [
+  { name: "QwenCodeAdapter", AdapterClass: QwenCodeAdapter, configDir: join(homedir(), ".qwen"), instructionFiles: ["QWEN.md"], memoryDir: join(homedir(), ".qwen", "memory") },
+  { name: "GeminiCLIAdapter", AdapterClass: GeminiCLIAdapter, configDir: join(homedir(), ".gemini"), instructionFiles: ["GEMINI.md"], memoryDir: join(homedir(), ".gemini", "memory") },
+  { name: "CodexAdapter", AdapterClass: CodexAdapter, configDir: join(homedir(), ".codex"), instructionFiles: ["AGENTS.md", "AGENTS.override.md"], memoryDir: join(homedir(), ".codex", "memories") },
+  { name: "OpenCodeAdapter (opencode)", AdapterClass: OpenCodeAdapter, configDir: join(xdgRoot, "opencode"), instructionFiles: ["AGENTS.md"], memoryDir: join(xdgRoot, "opencode", "memory") },
+  { name: "OpenCodeAdapter (kilo)", AdapterClass: OpenCodeAdapter, constructorArgs: ["kilo"], configDir: join(xdgRoot, "kilo"), instructionFiles: ["AGENTS.md"], memoryDir: join(xdgRoot, "kilo", "memory") },
+  { name: "ZedAdapter", AdapterClass: ZedAdapter, configDir: join(homedir(), ".config", "zed"), instructionFiles: ["AGENTS.md"], memoryDir: join(homedir(), ".config", "zed", "memory") },
+  { name: "AntigravityAdapter", AdapterClass: AntigravityAdapter, configDir: join(homedir(), ".gemini", "antigravity"), instructionFiles: ["GEMINI.md"], memoryDir: join(homedir(), ".gemini", "antigravity", "memory") },
+];
+
+// ── Project-scoped adapter specs ──────────────────────────
+
+interface ProjectScopedSpec {
+  name: string;
+  AdapterClass: AdapterConstructor;
+  configDir: (projectDir: string) => string;
+  instructionFiles: string[];
+  memoryDir: () => string;
+  memoryDirSuffix?: string;
+}
+
+const projectDir = join(fakeHome, "fixture-project");
+
+const projectScopedSpecs: ProjectScopedSpec[] = [
+  { name: "CursorAdapter", AdapterClass: CursorAdapter, configDir: (p) => resolve(p, ".cursor"), instructionFiles: ["context-mode.mdc"], memoryDir: () => resolve(process.cwd(), ".cursor", "memory") },
+  { name: "VSCodeCopilotAdapter", AdapterClass: VSCodeCopilotAdapter, configDir: (p) => resolve(p, ".github"), instructionFiles: ["copilot-instructions.md"], memoryDir: () => resolve(process.cwd(), ".github", "memory") },
+  { name: "KiroAdapter", AdapterClass: KiroAdapter, configDir: (p) => resolve(p, ".kiro"), instructionFiles: ["KIRO.md"], memoryDir: () => resolve(process.cwd(), ".kiro", "memory") },
+  { name: "OpenClawAdapter", AdapterClass: OpenClawAdapter, configDir: (p) => resolve(p), instructionFiles: ["AGENTS.md"], memoryDir: () => resolve(process.cwd(), "memory") },
+];
 
 describe("Adapter memory conventions", () => {
-  describe("QwenCodeAdapter", () => {
-    const a = new QwenCodeAdapter();
-    it("getConfigDir is ~/.qwen", () => {
-      expect(a.getConfigDir()).toBe(join(homedir(), ".qwen"));
-    });
-    it("getInstructionFiles is ['QWEN.md']", () => {
-      expect(a.getInstructionFiles()).toEqual(["QWEN.md"]);
-    });
-    it("getMemoryDir is ~/.qwen/memory", () => {
-      expect(a.getMemoryDir()).toBe(join(homedir(), ".qwen", "memory"));
-    });
+  // ── Home-rooted adapters ────────────────────────────────
+
+  describe("home-rooted adapters", () => {
+    it.each(homeRootedSpecs)(
+      "$name getConfigDir returns expected path",
+      ({ AdapterClass, constructorArgs, configDir }) => {
+        const a = constructorArgs ? new AdapterClass(...constructorArgs) : new AdapterClass();
+        expect(a.getConfigDir()).toBe(configDir);
+      },
+    );
+
+    it.each(homeRootedSpecs)(
+      "$name getInstructionFiles returns expected list",
+      ({ AdapterClass, constructorArgs, instructionFiles }) => {
+        const a = constructorArgs ? new AdapterClass(...constructorArgs) : new AdapterClass();
+        expect(a.getInstructionFiles()).toEqual(instructionFiles);
+      },
+    );
+
+    it.each(homeRootedSpecs)(
+      "$name getMemoryDir returns expected path",
+      ({ AdapterClass, constructorArgs, memoryDir }) => {
+        const a = constructorArgs ? new AdapterClass(...constructorArgs) : new AdapterClass();
+        expect(a.getMemoryDir()).toBe(memoryDir);
+      },
+    );
   });
 
-  describe("GeminiCLIAdapter", () => {
-    const a = new GeminiCLIAdapter();
-    it("getConfigDir is ~/.gemini", () => {
-      expect(a.getConfigDir()).toBe(join(homedir(), ".gemini"));
-    });
-    it("getInstructionFiles is ['GEMINI.md']", () => {
-      expect(a.getInstructionFiles()).toEqual(["GEMINI.md"]);
-    });
-    it("getMemoryDir is ~/.gemini/memory", () => {
-      expect(a.getMemoryDir()).toBe(join(homedir(), ".gemini", "memory"));
-    });
+  // ── Project-scoped adapters ──────────────────────────────
+
+  describe("project-scoped adapters", () => {
+    it.each(projectScopedSpecs)(
+      "$name getConfigDir(projectDir) returns expected absolute path",
+      ({ AdapterClass, configDir }) => {
+        const a = new AdapterClass();
+        expect(a.getConfigDir(projectDir)).toBe(configDir(projectDir));
+      },
+    );
+
+    it.each(projectScopedSpecs)(
+      "$name getInstructionFiles returns expected list",
+      ({ AdapterClass, instructionFiles }) => {
+        const a = new AdapterClass();
+        expect(a.getInstructionFiles()).toEqual(instructionFiles);
+      },
+    );
+
+    it.each(projectScopedSpecs)(
+      "$name getMemoryDir returns expected absolute path",
+      ({ AdapterClass, memoryDir }) => {
+        const a = new AdapterClass();
+        expect(a.getMemoryDir()).toBe(memoryDir());
+      },
+    );
   });
 
-  describe("CodexAdapter", () => {
-    const a = new CodexAdapter();
-    it("getConfigDir is ~/.codex", () => {
-      expect(a.getConfigDir()).toBe(join(homedir(), ".codex"));
-    });
-    it("getInstructionFiles is ['AGENTS.md', 'AGENTS.override.md']", () => {
-      expect(a.getInstructionFiles()).toEqual(["AGENTS.md", "AGENTS.override.md"]);
-    });
-    it("getMemoryDir is ~/.codex/memories (plural)", () => {
-      expect(a.getMemoryDir()).toBe(join(homedir(), ".codex", "memories"));
-    });
-  });
-
-  // OpenCode/KiloCode honor XDG_CONFIG_HOME on POSIX and APPDATA on Windows.
-  // setup-home anchors both env vars under fakeHome, so the expected root
-  // depends on platform.
-  const xdgRoot =
-    process.platform === "win32"
-      ? join(homedir(), "AppData", "Roaming")
-      : join(homedir(), ".config");
-
-  describe("OpenCodeAdapter (default platform=opencode)", () => {
-    const a = new OpenCodeAdapter();
-    it("getConfigDir is <xdg>/opencode", () => {
-      expect(a.getConfigDir()).toBe(join(xdgRoot, "opencode"));
-    });
-    it("getInstructionFiles is ['AGENTS.md']", () => {
-      expect(a.getInstructionFiles()).toEqual(["AGENTS.md"]);
-    });
-    it("getMemoryDir is <xdg>/opencode/memory", () => {
-      expect(a.getMemoryDir()).toBe(join(xdgRoot, "opencode", "memory"));
-    });
-  });
-
-  describe("OpenCodeAdapter (kilo variant)", () => {
-    const a = new OpenCodeAdapter("kilo");
-    it("getConfigDir is <xdg>/kilo", () => {
-      expect(a.getConfigDir()).toBe(join(xdgRoot, "kilo"));
-    });
-    it("getInstructionFiles is ['AGENTS.md']", () => {
-      expect(a.getInstructionFiles()).toEqual(["AGENTS.md"]);
-    });
-    it("getMemoryDir is <xdg>/kilo/memory", () => {
-      expect(a.getMemoryDir()).toBe(join(xdgRoot, "kilo", "memory"));
-    });
-  });
-
-  // Project-scoped adapters resolve their convention dir against an
-  // explicit projectDir per the always-absolute getConfigDir contract.
-  const projectDir = join(fakeHome, "fixture-project");
-
-  describe("CursorAdapter", () => {
-    const a = new CursorAdapter();
-    it("getConfigDir is <project>/.cursor (absolute)", () => {
-      expect(a.getConfigDir(projectDir)).toBe(resolve(projectDir, ".cursor"));
-    });
-    it("getInstructionFiles is ['context-mode.mdc']", () => {
-      expect(a.getInstructionFiles()).toEqual(["context-mode.mdc"]);
-    });
-    it("getMemoryDir is <cwd>/.cursor/memory (absolute, no projectDir → cwd)", () => {
-      // getMemoryDir() inherits BaseAdapter's default which calls
-      // getConfigDir() without args → cursor falls back to process.cwd().
-      expect(a.getMemoryDir()).toBe(resolve(process.cwd(), ".cursor", "memory"));
-    });
-  });
-
-  describe("VSCodeCopilotAdapter", () => {
-    const a = new VSCodeCopilotAdapter();
-    it("getConfigDir is <project>/.github (absolute)", () => {
-      expect(a.getConfigDir(projectDir)).toBe(resolve(projectDir, ".github"));
-    });
-    it("getInstructionFiles is ['copilot-instructions.md']", () => {
-      expect(a.getInstructionFiles()).toEqual(["copilot-instructions.md"]);
-    });
-    it("getMemoryDir is <cwd>/.github/memory (absolute)", () => {
-      expect(a.getMemoryDir()).toBe(resolve(process.cwd(), ".github", "memory"));
-    });
-  });
+  // ── JetBrains (special memoryDir check) ──────────────────
 
   describe("JetBrainsCopilotAdapter", () => {
     const a = new JetBrainsCopilotAdapter();
@@ -151,75 +142,13 @@ describe("Adapter memory conventions", () => {
       expect(a.getInstructionFiles()).toEqual(["copilot-instructions.md"]);
     });
     it("getMemoryDir is <project>/.github/memory (absolute)", () => {
-      // JetBrains adapter resolves via its own getProjectDir() (env var
-      // chain or cwd) when getMemoryDir() is called without args.
       expect(isAbsolute(a.getMemoryDir())).toBe(true);
       expect(a.getMemoryDir().endsWith(join(".github", "memory"))).toBe(true);
     });
   });
 
-  describe("KiroAdapter", () => {
-    const a = new KiroAdapter();
-    it("getConfigDir is <project>/.kiro (absolute)", () => {
-      expect(a.getConfigDir(projectDir)).toBe(resolve(projectDir, ".kiro"));
-    });
-    it("getInstructionFiles is ['KIRO.md']", () => {
-      expect(a.getInstructionFiles()).toEqual(["KIRO.md"]);
-    });
-    it("getMemoryDir is <cwd>/.kiro/memory (absolute)", () => {
-      expect(a.getMemoryDir()).toBe(resolve(process.cwd(), ".kiro", "memory"));
-    });
-  });
+  // ── Cross-adapter contract ──────────────────────────────
 
-  describe("ZedAdapter", () => {
-    const a = new ZedAdapter();
-    it("getConfigDir is ~/.config/zed", () => {
-      expect(a.getConfigDir()).toBe(join(homedir(), ".config", "zed"));
-    });
-    it("getInstructionFiles is ['AGENTS.md']", () => {
-      expect(a.getInstructionFiles()).toEqual(["AGENTS.md"]);
-    });
-    it("getMemoryDir is ~/.config/zed/memory", () => {
-      expect(a.getMemoryDir()).toBe(join(homedir(), ".config", "zed", "memory"));
-    });
-  });
-
-  describe("AntigravityAdapter", () => {
-    const a = new AntigravityAdapter();
-    it("getConfigDir is ~/.gemini/antigravity", () => {
-      expect(a.getConfigDir()).toBe(join(homedir(), ".gemini", "antigravity"));
-    });
-    it("getInstructionFiles is ['GEMINI.md']", () => {
-      expect(a.getInstructionFiles()).toEqual(["GEMINI.md"]);
-    });
-    it("getMemoryDir is ~/.gemini/antigravity/memory", () => {
-      expect(a.getMemoryDir()).toBe(
-        join(homedir(), ".gemini", "antigravity", "memory"),
-      );
-    });
-  });
-
-  describe("OpenClawAdapter", () => {
-    const a = new OpenClawAdapter();
-    it("getConfigDir is <project> root (absolute)", () => {
-      expect(a.getConfigDir(projectDir)).toBe(resolve(projectDir));
-    });
-    it("getInstructionFiles is ['AGENTS.md']", () => {
-      expect(a.getInstructionFiles()).toEqual(["AGENTS.md"]);
-    });
-    it("getMemoryDir is <cwd>/memory (absolute)", () => {
-      expect(a.getMemoryDir()).toBe(resolve(process.cwd(), "memory"));
-    });
-  });
-
-  // ──────────────────────────────────────────────────────────────────
-  // Cross-adapter contract — getConfigDir() ALWAYS returns absolute
-  //
-  // Catches the leaky-seam bug where some adapters returned project-
-  // relative segments ("", ".cursor", ".github", ".kiro") and others
-  // returned absolute paths. Every consumer (server.ts, auto-memory.ts)
-  // can now treat the return uniformly without isAbsolute() guards.
-  // ──────────────────────────────────────────────────────────────────
   describe("HookAdapter.getConfigDir contract", () => {
     const projectDirForContract = join(fakeHome, "fixture-project");
 

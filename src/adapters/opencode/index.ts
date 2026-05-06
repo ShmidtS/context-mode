@@ -35,6 +35,7 @@ import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 
 import { BaseAdapter } from "../base.js";
+import { normalizeSessionSource } from "../shared.js";
 
 import type {
   HookAdapter,
@@ -152,26 +153,9 @@ export class OpenCodeAdapter extends BaseAdapter implements HookAdapter {
 
   parseSessionStartInput(raw: unknown): SessionStartEvent {
     const input = raw as OpenCodeHookInput;
-    const rawSource = input.source ?? "startup";
-
-    let source: SessionStartEvent["source"];
-    switch (rawSource) {
-      case "compact":
-        source = "compact";
-        break;
-      case "resume":
-        source = "resume";
-        break;
-      case "clear":
-        source = "clear";
-        break;
-      default:
-        source = "startup";
-    }
-
     return {
       sessionId: this.extractSessionId(input),
-      source,
+      source: normalizeSessionSource(input.source),
       projectDir: process.env.OPENCODE_PROJECT_DIR || process.cwd(),
       raw,
     };

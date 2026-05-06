@@ -1042,48 +1042,34 @@ function createSeededStore(): ContentStore {
   return store;
 }
 
+// ── Parameterized searchTrigram specs ────────────────────────
+
+interface SearchTrigramSpec {
+  desc: string;
+  query: string;
+  contentContains: string;
+}
+
+const searchTrigramSpecs: SearchTrigramSpec[] = [
+  { desc: "substring match ('authenticat' → authentication)", query: "authenticat", contentContains: "authentication" },
+  { desc: "partial hyphenated term ('row-level' → row-level-security)", query: "row-level", contentContains: "row-level" },
+  { desc: "camelCase substring ('useEff' → useEffect)", query: "useEff", contentContains: "useEffect" },
+];
+
 describe("searchTrigram: Substring Matching", () => {
-  test("searchTrigram: finds substring match ('authenticat' → authentication)", async () => {
+  test.each(searchTrigramSpecs)("$desc", ({ query, contentContains }) => {
     const store = createSeededStore();
-    // "authenticat" is a partial substring of "authentication"
-    // Porter stemming won't match this — trigram should
-    const results = store.searchTrigram("authenticat", 3);
-    assert.ok(results.length > 0, "Trigram should find substring match");
+    const results = store.searchTrigram(query, 3);
+    assert.ok(results.length > 0, `Trigram should find match for '${query}'`);
     assert.ok(
-      results[0].content.toLowerCase().includes("authentication"),
-      `Result should contain 'authentication', got: ${results[0].content.slice(0, 100)}`,
+      results[0].content.toLowerCase().includes(contentContains.toLowerCase()),
+      `Result should contain '${contentContains}', got: ${results[0].content.slice(0, 100)}`,
     );
     store.close();
   });
 
-  test("searchTrigram: finds partial hyphenated term ('row-level' → row-level-security)", async () => {
+  test("searchTrigram: respects source filter", () => {
     const store = createSeededStore();
-    // Partial match on hyphenated compound term
-    const results = store.searchTrigram("row-level", 3);
-    assert.ok(results.length > 0, "Trigram should match partial hyphenated terms");
-    assert.ok(
-      results[0].content.toLowerCase().includes("row-level-security") ||
-        results[0].content.toLowerCase().includes("row-level"),
-      `Result should contain row-level content, got: ${results[0].content.slice(0, 100)}`,
-    );
-    store.close();
-  });
-
-  test("searchTrigram: finds camelCase substring ('useEff' → useEffect)", async () => {
-    const store = createSeededStore();
-    // "useEff" is a prefix of "useEffect" — trigram should match
-    const results = store.searchTrigram("useEff", 3);
-    assert.ok(results.length > 0, "Trigram should match camelCase substrings");
-    assert.ok(
-      results[0].content.includes("useEffect"),
-      `Result should contain 'useEffect', got: ${results[0].content.slice(0, 100)}`,
-    );
-    store.close();
-  });
-
-  test("searchTrigram: respects source filter", async () => {
-    const store = createSeededStore();
-    // "cache" appears in both "Caching docs" and potentially elsewhere
     const allResults = store.searchTrigram("cache", 10);
     const filteredResults = store.searchTrigram("cache", 10, "Caching");
     assert.ok(filteredResults.length > 0, "Should find results with source filter");
@@ -1091,119 +1077,70 @@ describe("searchTrigram: Substring Matching", () => {
       filteredResults.every((r) => r.source.includes("Caching")),
       `All filtered results should be from Caching source, got: ${filteredResults.map((r) => r.source).join(", ")}`,
     );
-    // Filtered should be subset
-    assert.ok(
-      filteredResults.length <= allResults.length,
-      "Filtered results should be <= all results",
-    );
+    assert.ok(filteredResults.length <= allResults.length, "Filtered results should be <= all results");
     store.close();
   });
 });
+
+// ── Parameterized fuzzyCorrect specs ────────────────────────
+
+interface FuzzyCorrectSpec {
+  desc: string;
+  input: string;
+  expected: string | null;
+}
+
+const fuzzyCorrectSpecs: FuzzyCorrectSpec[] = [
+  { desc: "corrects single typo ('autentication' → 'authentication')", input: "autentication", expected: "authentication" },
+  { desc: "returns null for exact match (no correction needed)", input: "authentication", expected: null },
+  { desc: "returns null for gibberish (too distant)", input: "xyzqwertymno", expected: null },
+];
 
 describe("fuzzyCorrect: Levenshtein Typo Correction", () => {
-  test("fuzzyCorrect: corrects single typo ('autentication' → 'authentication')", async () => {
+  test.each(fuzzyCorrectSpecs)("$desc", ({ input, expected }) => {
     const store = createSeededStore();
-    // Missing 'h' — edit distance 1
-    const corrected = store.fuzzyCorrect("autentication");
-    assert.ok(corrected !== null, "Should return a correction for single typo");
-    assert.equal(
-      corrected,
-      "authentication",
-      `Should correct to 'authentication', got: '${corrected}'`,
-    );
-    store.close();
-  });
-
-  test("fuzzyCorrect: returns null for exact match (no correction needed)", async () => {
-    const store = createSeededStore();
-    // Exact word exists in vocabulary — no correction needed
-    const corrected = store.fuzzyCorrect("authentication");
-    assert.equal(
-      corrected,
-      null,
-      "Should return null when word already exists in vocabulary",
-    );
-    store.close();
-  });
-
-  test("fuzzyCorrect: returns null for gibberish (too distant)", async () => {
-    const store = createSeededStore();
-    // Completely unrelated — edit distance too high for any vocabulary word
-    const corrected = store.fuzzyCorrect("xyzqwertymno");
-    assert.equal(
-      corrected,
-      null,
-      "Should return null when no close match exists",
-    );
+    const corrected = store.fuzzyCorrect(input);
+    assert.equal(corrected, expected);
     store.close();
   });
 });
 
+// ── Parameterized Three-Layer Cascade specs ──────────────────
+
+interface CascadeSpec {
+  desc: string;
+  query: string;
+  contentContains: string;
+  matchLayer: string | null;
+  expectEmpty?: boolean;
+}
+
+const cascadeSpecs: CascadeSpec[] = [
+  { desc: "Layer 1 hit (Porter) — exact stemmed match", query: "caching strategy", contentContains: "cach", matchLayer: "rrf" },
+  { desc: "Layer 2 hit (Trigram) — partial substring", query: "connectionPo", contentContains: "connectionPool", matchLayer: "rrf" },
+  { desc: "Layer 3 hit (Fuzzy) — typo correction", query: "kuberntes", contentContains: "kubernetes", matchLayer: "rrf-fuzzy" },
+  { desc: "no match at any layer returns empty", query: "xylophoneQuartzMango", contentContains: "", matchLayer: null, expectEmpty: true },
+];
+
 describe("searchWithFallback: Three-Layer Cascade", () => {
-  test("searchWithFallback: Layer 1 hit (Porter) — exact stemmed match", async () => {
+  test.each(cascadeSpecs)("$desc", async ({ query, contentContains, matchLayer, expectEmpty }) => {
     const store = createSeededStore();
-    // "caching" stems to "cach" via Porter — Layer 1 should match directly
-    const results = await store.searchWithFallback("caching strategy", 3);
-    assert.ok(results.length > 0, "Layer 1 (Porter) should find stemmed match");
-    assert.ok(
-      results[0].content.toLowerCase().includes("cach"),
-      `First result should be about caching, got: ${results[0].content.slice(0, 100)}`,
-    );
-    // Verify it used RRF (fused path)
-    assert.equal(
-      results[0].matchLayer,
-      "rrf",
-      `Should report 'rrf' as match layer, got: '${results[0].matchLayer}'`,
-    );
-    store.close();
-  });
-
-  test("searchWithFallback: Layer 2 hit (Trigram) — partial substring", async () => {
-    const store = createSeededStore();
-    // "connectionPo" is a partial camelCase — Porter won't match, trigram will
-    const results = await store.searchWithFallback("connectionPo", 3);
-    assert.ok(results.length > 0, "Layer 2 (Trigram) should find substring match");
-    assert.ok(
-      results[0].content.includes("connectionPool"),
-      `Result should contain 'connectionPool', got: ${results[0].content.slice(0, 100)}`,
-    );
-    assert.equal(
-      results[0].matchLayer,
-      "rrf",
-      `Should report 'rrf' as match layer, got: '${results[0].matchLayer}'`,
-    );
-    store.close();
-  });
-
-  test("searchWithFallback: Layer 3 hit (Fuzzy) — typo correction", async () => {
-    const store = createSeededStore();
-    // "kuberntes" is a typo for "kubernetes" (missing 'e')
-    const results = await store.searchWithFallback("kuberntes", 3);
-    assert.ok(results.length > 0, "Layer 3 (Fuzzy) should find typo-corrected match");
-    assert.ok(
-      results[0].content.toLowerCase().includes("kubernetes"),
-      `Result should contain 'kubernetes', got: ${results[0].content.slice(0, 100)}`,
-    );
-    assert.equal(
-      results[0].matchLayer,
-      "rrf-fuzzy",
-      `Should report 'rrf-fuzzy' as match layer, got: '${results[0].matchLayer}'`,
-    );
-    store.close();
-  });
-
-  test("searchWithFallback: no match at any layer returns empty", async () => {
-    const store = createSeededStore();
-    // Completely unrelated term with no substring or fuzzy match
-    const results = await store.searchWithFallback("xylophoneQuartzMango", 3);
-    assert.equal(results.length, 0, "Should return empty when no layer matches");
+    const results = await store.searchWithFallback(query, 3);
+    if (expectEmpty) {
+      assert.equal(results.length, 0, "Should return empty when no layer matches");
+    } else {
+      assert.ok(results.length > 0, `Should find results for '${query}'`);
+      assert.ok(
+        results[0].content.toLowerCase().includes(contentContains.toLowerCase()),
+        `Result should contain '${contentContains}', got: ${results[0].content.slice(0, 100)}`,
+      );
+      if (matchLayer) assert.equal(results[0].matchLayer, matchLayer, `Should report '${matchLayer}' as match layer`);
+    }
     store.close();
   });
 
   test("searchWithFallback: source filter works across all layers", async () => {
     const store = createSeededStore();
-    // "JWT" exists in both Auth docs and Deployment docs (JWT_SECRET)
-    // With source filter, should only return Auth docs
     const results = await store.searchWithFallback("JWT", 5, "Auth");
     assert.ok(results.length > 0, "Should find results with source filter");
     assert.ok(

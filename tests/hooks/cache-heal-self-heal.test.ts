@@ -107,10 +107,8 @@ describe("extractNodePath", () => {
 
   test("returns null for empty / non-string input", () => {
     expect(extractNodePath("")).toBeNull();
-    // @ts-expect-error — runtime guard
-    expect(extractNodePath(undefined)).toBeNull();
-    // @ts-expect-error — runtime guard
-    expect(extractNodePath(null)).toBeNull();
+    expect(extractNodePath(undefined as unknown as string)).toBeNull();
+    expect(extractNodePath(null as unknown as string)).toBeNull();
   });
 
   test("returns null when leading path doesn't look like a node executable", () => {
@@ -194,13 +192,14 @@ describe("buildHookCommand", () => {
       buildHookCommand({
         scriptPath: "C:/x.mjs",
         platform: "win32",
+        nodePath: undefined as unknown as string,
       }),
     ).toThrow();
   });
 
   test("missing scriptPath throws", () => {
     expect(() =>
-      buildHookCommand({ platform: "linux", nodePath: "/usr/bin/node" }),
+      buildHookCommand({ platform: "linux", nodePath: "/usr/bin/node", scriptPath: undefined as unknown as string }),
     ).toThrow();
   });
 

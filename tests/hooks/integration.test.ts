@@ -126,67 +126,38 @@ function assertHookSpecificOutput(result: HookResult, key: string) {
   );
 }
 
+// ── Parameterized Bash redirect specs ───────────────────────
+
+const bashRedirectSpecs: Array<{ desc: string; command: string; hint: string }> = [
+  { desc: "curl: redirected to echo via updatedInput", command: "curl -s http://example.com", hint: "context-mode" },
+  { desc: "wget: redirected to echo via updatedInput", command: "wget http://example.com/file.tar.gz", hint: "context-mode" },
+  { desc: "node -e with inline HTTP call: redirected to echo", command: `node -e "fetch('http://api.example.com/data')"`, hint: "context-mode" },
+  { desc: "./gradlew build: redirected to execute sandbox (Issue #38)", command: "./gradlew build --info", hint: "Build tool redirected" },
+  { desc: "mvn package: redirected to execute sandbox (Issue #38)", command: "mvn clean package -DskipTests", hint: "Build tool redirected" },
+];
+
 describe("Bash: Redirected Commands", () => {
-  test("Bash + curl: redirected to echo via updatedInput", () => {
+  test.each(bashRedirectSpecs)("Bash + $desc", ({ command, hint }) => {
     const result = runHook({
       tool_name: "Bash",
-      tool_input: { command: "curl -s http://example.com" },
+      tool_input: { command },
     });
-    assertRedirect(result, "context-mode");
-  });
-
-  test("Bash + wget: redirected to echo via updatedInput", () => {
-    const result = runHook({
-      tool_name: "Bash",
-      tool_input: { command: "wget http://example.com/file.tar.gz" },
-    });
-    assertRedirect(result, "context-mode");
-  });
-
-  test("Bash + node -e with inline HTTP call: redirected to echo", () => {
-    const result = runHook({
-      tool_name: "Bash",
-      tool_input: { command: `node -e "fetch('http://api.example.com/data')"` },
-    });
-    assertRedirect(result, "context-mode");
-  });
-
-  test("Bash + ./gradlew build: redirected to execute sandbox (Issue #38)", () => {
-    const result = runHook({
-      tool_name: "Bash",
-      tool_input: { command: "./gradlew build --info" },
-    });
-    assertRedirect(result, "Build tool redirected");
-  });
-
-  test("Bash + mvn package: redirected to execute sandbox (Issue #38)", () => {
-    const result = runHook({
-      tool_name: "Bash",
-      tool_input: { command: "mvn clean package -DskipTests" },
-    });
-    assertRedirect(result, "Build tool redirected");
+    assertRedirect(result, hint);
   });
 });
 
-describe("Bash: Allowed Commands", () => {
-  test("Bash + git status: additionalContext with BASH_GUIDANCE", () => {
-    const result = runHook({
-      tool_name: "Bash",
-      tool_input: { command: "git status" },
-    });
-    assert.equal(result.exitCode, 0);
-    const parsed = JSON.parse(result.stdout);
-    assert.ok(parsed.hookSpecificOutput.additionalContext, "Expected additionalContext for Bash");
-    assert.ok(
-      parsed.hookSpecificOutput.additionalContext.includes("<context_guidance>"),
-      "Expected <context_guidance> in Bash additionalContext",
-    );
-  });
+// ── Parameterized Bash allowed specs ────────────────────────
 
-  test("Bash + mkdir /tmp/test: additionalContext with BASH_GUIDANCE", () => {
+const bashAllowedSpecs: Array<{ desc: string; command: string }> = [
+  { desc: "git status", command: "git status" },
+  { desc: "mkdir /tmp/test", command: "mkdir /tmp/test" },
+];
+
+describe("Bash: Allowed Commands", () => {
+  test.each(bashAllowedSpecs)("Bash + $desc: additionalContext with BASH_GUIDANCE", ({ command }) => {
     const result = runHook({
       tool_name: "Bash",
-      tool_input: { command: "mkdir /tmp/test" },
+      tool_input: { command },
     });
     assert.equal(result.exitCode, 0);
     const parsed = JSON.parse(result.stdout);
@@ -285,28 +256,17 @@ describe("Grep", () => {
   });
 });
 
+// ── Parameterized passthrough tool specs ────────────────────
+
+const passthroughSpecs: Array<{ desc: string; tool_name: string; tool_input: Record<string, string> }> = [
+  { desc: "Glob + pattern", tool_name: "Glob", tool_input: { pattern: "**/*.ts" } },
+  { desc: "WebSearch", tool_name: "WebSearch", tool_input: { query: "typescript best practices" } },
+  { desc: "Unknown tool (Edit)", tool_name: "Edit", tool_input: { file_path: "/tmp/test.ts", old_string: "foo", new_string: "bar" } },
+];
+
 describe("Passthrough Tools", () => {
-  test("Glob + pattern: passthrough", () => {
-    const result = runHook({
-      tool_name: "Glob",
-      tool_input: { pattern: "**/*.ts" },
-    });
-    assertPassthrough(result);
-  });
-
-  test("WebSearch: passthrough", () => {
-    const result = runHook({
-      tool_name: "WebSearch",
-      tool_input: { query: "typescript best practices" },
-    });
-    assertPassthrough(result);
-  });
-
-  test("Unknown tool (Edit): passthrough", () => {
-    const result = runHook({
-      tool_name: "Edit",
-      tool_input: { file_path: "/tmp/test.ts", old_string: "foo", new_string: "bar" },
-    });
+  test.each(passthroughSpecs)("$desc: passthrough", ({ tool_name, tool_input }) => {
+    const result = runHook({ tool_name, tool_input });
     assertPassthrough(result);
   });
 });

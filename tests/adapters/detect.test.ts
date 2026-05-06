@@ -12,105 +12,120 @@ import { KiroAdapter } from "../../src/adapters/kiro/index.js";
 import { QwenCodeAdapter } from "../../src/adapters/qwen-code/index.js";
 import { JetBrainsCopilotAdapter } from "../../src/adapters/jetbrains-copilot/index.js";
 
+// ── Shared env var cleanup ────────────────────────────────
+
+const PLATFORM_ENV_VARS = [
+  "CLAUDE_PROJECT_DIR", "CLAUDE_SESSION_ID",
+  "GEMINI_PROJECT_DIR", "GEMINI_CLI",
+  "KILO", "KILO_PID",
+  "OPENCODE", "OPENCODE_PID",
+  "OPENCLAW_HOME", "OPENCLAW_CLI",
+  "CODEX_CI", "CODEX_THREAD_ID",
+  "CURSOR_CWD", "CURSOR_SESSION_ID", "CURSOR_TRACE_ID", "CURSOR_CLI",
+  "VSCODE_PID", "VSCODE_CWD",
+  "QWEN_PROJECT_DIR",
+  "IDEA_INITIAL_DIRECTORY", "IDEA_HOME", "JETBRAINS_CLIENT_ID",
+  "ANTIGRAVITY_CLI_ALIAS",
+  "ZED_SESSION_ID", "ZED_TERM",
+  "PI_PROJECT_DIR",
+  "CONTEXT_MODE_PLATFORM",
+];
+
+let savedEnv: NodeJS.ProcessEnv;
+
+beforeEach(() => {
+  savedEnv = { ...process.env };
+  for (const key of PLATFORM_ENV_VARS) delete process.env[key];
+  vi.restoreAllMocks();
+});
+
+afterEach(() => {
+  process.env = savedEnv;
+});
+
+// ── Parameterized env-var detection specs ─────────────────
+
+interface EnvDetectionSpec {
+  desc: string;
+  envVars: Record<string, string>;
+  expectedPlatform: string;
+}
+
+const envDetectionSpecs: EnvDetectionSpec[] = [
+  { desc: "claude-code when CLAUDE_PROJECT_DIR is set", envVars: { CLAUDE_PROJECT_DIR: "/some/project" }, expectedPlatform: "claude-code" },
+  { desc: "claude-code when CLAUDE_SESSION_ID is set", envVars: { CLAUDE_SESSION_ID: "abc-123" }, expectedPlatform: "claude-code" },
+  { desc: "gemini-cli when GEMINI_PROJECT_DIR is set", envVars: { GEMINI_PROJECT_DIR: "/some/project" }, expectedPlatform: "gemini-cli" },
+  { desc: "gemini-cli when GEMINI_CLI is set", envVars: { GEMINI_CLI: "1" }, expectedPlatform: "gemini-cli" },
+  { desc: "opencode when OPENCODE=1 is set", envVars: { OPENCODE: "1" }, expectedPlatform: "opencode" },
+  { desc: "opencode when OPENCODE_PID is set", envVars: { OPENCODE_PID: "12345" }, expectedPlatform: "opencode" },
+  { desc: "kilo when KILO_PID is set", envVars: { KILO_PID: "12345" }, expectedPlatform: "kilo" },
+  { desc: "codex when CODEX_CI is set", envVars: { CODEX_CI: "1" }, expectedPlatform: "codex" },
+  { desc: "codex when CODEX_THREAD_ID is set", envVars: { CODEX_THREAD_ID: "thread-abc" }, expectedPlatform: "codex" },
+  { desc: "cursor when CURSOR_TRACE_ID is set", envVars: { CURSOR_TRACE_ID: "trace-abc-123" }, expectedPlatform: "cursor" },
+  { desc: "cursor when CURSOR_CLI is set", envVars: { CURSOR_CLI: "1" }, expectedPlatform: "cursor" },
+  { desc: "vscode-copilot when VSCODE_PID is set", envVars: { VSCODE_PID: "12345" }, expectedPlatform: "vscode-copilot" },
+  { desc: "vscode-copilot when VSCODE_CWD is set", envVars: { VSCODE_CWD: "/some/dir" }, expectedPlatform: "vscode-copilot" },
+  { desc: "antigravity via ANTIGRAVITY_CLI_ALIAS", envVars: { ANTIGRAVITY_CLI_ALIAS: "agtg" }, expectedPlatform: "antigravity" },
+  { desc: "zed via ZED_SESSION_ID", envVars: { ZED_SESSION_ID: "01HZED-uuid" }, expectedPlatform: "zed" },
+  { desc: "zed via ZED_TERM", envVars: { ZED_TERM: "true" }, expectedPlatform: "zed" },
+  { desc: "pi via PI_PROJECT_DIR", envVars: { PI_PROJECT_DIR: "/some/project" }, expectedPlatform: "pi" },
+  { desc: "jetbrains-copilot via IDEA_INITIAL_DIRECTORY", envVars: { IDEA_INITIAL_DIRECTORY: "/home/user/project" }, expectedPlatform: "jetbrains-copilot" },
+  { desc: "qwen-code via QWEN_PROJECT_DIR", envVars: { QWEN_PROJECT_DIR: "/some/project" }, expectedPlatform: "qwen-code" },
+];
+
+// ── Parameterized clientInfo detection specs ──────────────
+
+interface ClientInfoSpec {
+  desc: string;
+  clientInfo: { name: string; version?: string };
+  expectedPlatform: string;
+}
+
+const clientInfoSpecs: ClientInfoSpec[] = [
+  { desc: "antigravity when clientInfo name is antigravity-client", clientInfo: { name: "antigravity-client", version: "1.0" }, expectedPlatform: "antigravity" },
+  { desc: "kiro when clientInfo name is Kiro CLI", clientInfo: { name: "Kiro CLI", version: "1.0.0" }, expectedPlatform: "kiro" },
+  { desc: "gemini-cli when clientInfo name is gemini-cli-mcp-client", clientInfo: { name: "gemini-cli-mcp-client", version: "1.0" }, expectedPlatform: "gemini-cli" },
+  { desc: "cursor when clientInfo name is cursor-vscode", clientInfo: { name: "cursor-vscode", version: "1.0" }, expectedPlatform: "cursor" },
+  { desc: "qwen-code via qwen-cli-mcp-client clientInfo", clientInfo: { name: "qwen-cli-mcp-client-context-mode" }, expectedPlatform: "qwen-code" },
+];
+
+// ── Parameterized getAdapter specs ────────────────────────
+
+interface GetAdapterSpec {
+  platform: string;
+  AdapterClass: new (...args: any[]) => unknown;
+  extraCheck?: (adapter: unknown) => void;
+}
+
+const getAdapterSpecs: GetAdapterSpec[] = [
+  { platform: "claude-code", AdapterClass: ClaudeCodeAdapter },
+  { platform: "gemini-cli", AdapterClass: GeminiCLIAdapter },
+  { platform: "opencode", AdapterClass: OpenCodeAdapter },
+  { platform: "kilo", AdapterClass: OpenCodeAdapter, extraCheck: (a) => { expect((a as any).name).toBe("KiloCode"); } },
+  { platform: "openclaw", AdapterClass: OpenClawAdapter },
+  { platform: "codex", AdapterClass: CodexAdapter },
+  { platform: "vscode-copilot", AdapterClass: VSCodeCopilotAdapter },
+  { platform: "cursor", AdapterClass: CursorAdapter },
+  { platform: "antigravity", AdapterClass: AntigravityAdapter },
+  { platform: "kiro", AdapterClass: KiroAdapter },
+  { platform: "qwen-code", AdapterClass: QwenCodeAdapter },
+  { platform: "jetbrains-copilot", AdapterClass: JetBrainsCopilotAdapter },
+];
+
 // ─────────────────────────────────────────────────────────
 // detectPlatform — env var detection
 // ─────────────────────────────────────────────────────────
 
 describe("detectPlatform", () => {
-  let savedEnv: NodeJS.ProcessEnv;
-
-  beforeEach(() => {
-    savedEnv = { ...process.env };
-    // Clear all platform-specific env vars to get a clean slate
-    delete process.env.CLAUDE_PROJECT_DIR;
-    delete process.env.CLAUDE_SESSION_ID;
-    delete process.env.GEMINI_PROJECT_DIR;
-    delete process.env.GEMINI_CLI;
-    delete process.env.KILO;
-    delete process.env.KILO_PID;
-    delete process.env.OPENCODE;
-    delete process.env.OPENCODE_PID;
-    delete process.env.OPENCLAW_HOME;
-    delete process.env.OPENCLAW_CLI;
-    delete process.env.CODEX_CI;
-    delete process.env.CODEX_THREAD_ID;
-    delete process.env.CURSOR_CWD;
-    delete process.env.CURSOR_SESSION_ID;
-    delete process.env.CURSOR_TRACE_ID;
-    delete process.env.VSCODE_PID;
-    delete process.env.VSCODE_CWD;
-    delete process.env.QWEN_PROJECT_DIR;
-    delete process.env.IDEA_INITIAL_DIRECTORY;
-    delete process.env.IDEA_HOME;
-    delete process.env.JETBRAINS_CLIENT_ID;
-    delete process.env.CONTEXT_MODE_PLATFORM;
-    vi.restoreAllMocks();
-  });
-
-  afterEach(() => {
-    process.env = savedEnv;
-  });
-
-  // ── Claude Code ────────────────────────────────────────
-
-  it("returns claude-code when CLAUDE_PROJECT_DIR is set", () => {
-    process.env.CLAUDE_PROJECT_DIR = "/some/project";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("claude-code");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("returns claude-code when CLAUDE_SESSION_ID is set", () => {
-    process.env.CLAUDE_SESSION_ID = "abc-123";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("claude-code");
-    expect(signal.confidence).toBe("high");
-  });
-
-  // ── Gemini CLI ─────────────────────────────────────────
-
-  it("returns gemini-cli when GEMINI_PROJECT_DIR is set (hooks context)", () => {
-    process.env.GEMINI_PROJECT_DIR = "/some/project";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("gemini-cli");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("returns gemini-cli when GEMINI_CLI is set (MCP context)", () => {
-    process.env.GEMINI_CLI = "1";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("gemini-cli");
-    expect(signal.confidence).toBe("high");
-  });
-
-  // ── OpenCode ───────────────────────────────────────────
-
-  it("returns opencode when OPENCODE=1 is set", () => {
-    process.env.OPENCODE = "1";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("opencode");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("returns opencode when OPENCODE_PID is set", () => {
-    process.env.OPENCODE_PID = "12345";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("opencode");
-    expect(signal.confidence).toBe("high");
-  });
-
-  // ── Kilo ────────────────────────────────────────────────
-  // Kilo-Org/kilocode packages/opencode/src/index.ts:140 sets KILO_PID
-  // unconditionally. Bare `KILO` is NEVER set (verified via upstream source
-  // audit, May 2026). Kilo also sets OPENCODE=1 because it's an OpenCode fork
-  // — `kilo` MUST precede `opencode` in PLATFORM_ENV_VARS so KILO_PID wins.
-
-  it("returns kilo when KILO_PID is set", () => {
-    process.env.KILO_PID = "12345";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("kilo");
-    expect(signal.confidence).toBe("high");
-  });
+  it.each(envDetectionSpecs)(
+    "returns $expectedPlatform $desc",
+    ({ envVars, expectedPlatform }) => {
+      Object.assign(process.env, envVars);
+      const signal = detectPlatform();
+      expect(signal.platform).toBe(expectedPlatform);
+      expect(signal.confidence).toBe("high");
+    },
+  );
 
   it("kilo wins when both KILO_PID and OPENCODE are set (fork-collision)", () => {
     process.env.KILO_PID = "12345";
@@ -119,84 +134,7 @@ describe("detectPlatform", () => {
     expect(signal.platform).toBe("kilo");
   });
 
-  // ── OpenClaw ───────────────────────────────────────────
-  // Removed env-var detection: OpenClaw runtime never sets OPENCLAW_HOME or
-  // OPENCLAW_CLI (verified by local repo audit). Detection now relies on
-  // ~/.openclaw/ config-dir tier (tested in detect-config-dir.test.ts).
-
-  // ── Antigravity (Google) ───────────────────────────────
-  // google-gemini/gemini-cli packages/core/src/ide/detect-ide.ts checks
-  // ANTIGRAVITY_CLI_ALIAS as the canonical Antigravity marker.
-
-  it("detects antigravity via ANTIGRAVITY_CLI_ALIAS env var", () => {
-    process.env.ANTIGRAVITY_CLI_ALIAS = "agtg";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("antigravity");
-    expect(signal.confidence).toBe("high");
-  });
-
-  // ── Zed ────────────────────────────────────────────────
-  // zed-industries/zed crates/terminal/src/terminal.rs sets ZED_TERM=true.
-  // google-gemini/gemini-cli detect-ide.ts checks ZED_SESSION_ID first.
-
-  it("detects zed via ZED_SESSION_ID env var", () => {
-    process.env.ZED_SESSION_ID = "01HZED-uuid";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("zed");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("detects zed via ZED_TERM env var", () => {
-    process.env.ZED_TERM = "true";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("zed");
-    expect(signal.confidence).toBe("high");
-  });
-
-  // ── Pi ─────────────────────────────────────────────────
-  // Pi runtime sets PI_PROJECT_DIR before invoking the extension —
-  // verified by src/pi-extension.ts:154 + src/server.ts:153 consumers.
-
-  it("detects pi via PI_PROJECT_DIR env var", () => {
-    process.env.PI_PROJECT_DIR = "/some/project";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("pi");
-    expect(signal.confidence).toBe("high");
-  });
-
-  // ── Codex CLI ──────────────────────────────────────────
-
-  it("returns codex when CODEX_CI is set", () => {
-    process.env.CODEX_CI = "1";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("codex");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("returns codex when CODEX_THREAD_ID is set", () => {
-    process.env.CODEX_THREAD_ID = "thread-abc";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("codex");
-    expect(signal.confidence).toBe("high");
-  });
-
-  // ── Cursor ─────────────────────────────────────────────
-
-  it("returns cursor when CURSOR_TRACE_ID is set", () => {
-    process.env.CURSOR_TRACE_ID = "trace-abc-123";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("cursor");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("returns cursor when CURSOR_CLI is set", () => {
-    process.env.CURSOR_CLI = "1";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("cursor");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("prefers cursor over vscode-copilot when both Cursor and VS Code env vars are set", () => {
+  it("prefers cursor over vscode-copilot when both env vars are set", () => {
     process.env.CURSOR_TRACE_ID = "trace-abc-123";
     process.env.VSCODE_PID = "12345";
     const signal = detectPlatform();
@@ -204,47 +142,18 @@ describe("detectPlatform", () => {
     expect(signal.confidence).toBe("high");
   });
 
-  // ── VS Code Copilot ────────────────────────────────────
+  it.each(clientInfoSpecs)(
+    "returns $expectedPlatform $desc",
+    ({ clientInfo, expectedPlatform }) => {
+      const signal = detectPlatform(clientInfo);
+      expect(signal.platform).toBe(expectedPlatform);
+      expect(signal.confidence).toBe("high");
+    },
+  );
 
-  it("returns vscode-copilot when VSCODE_PID is set", () => {
-    process.env.VSCODE_PID = "12345";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("vscode-copilot");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("returns vscode-copilot when VSCODE_CWD is set", () => {
-    process.env.VSCODE_CWD = "/some/dir";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("vscode-copilot");
-    expect(signal.confidence).toBe("high");
-  });
-
-  // ── MCP clientInfo detection ─────────────────────────────
-
-  it("returns antigravity when clientInfo name is antigravity-client", () => {
+  it("antigravity clientInfo detection reason contains clientInfo", () => {
     const signal = detectPlatform({ name: "antigravity-client", version: "1.0" });
-    expect(signal.platform).toBe("antigravity");
-    expect(signal.confidence).toBe("high");
     expect(signal.reason).toContain("clientInfo");
-  });
-
-  it("returns kiro when clientInfo name is Kiro CLI", () => {
-    const signal = detectPlatform({ name: "Kiro CLI", version: "1.0.0" });
-    expect(signal.platform).toBe("kiro");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("returns gemini-cli when clientInfo name is gemini-cli-mcp-client", () => {
-    const signal = detectPlatform({ name: "gemini-cli-mcp-client", version: "1.0" });
-    expect(signal.platform).toBe("gemini-cli");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("returns cursor when clientInfo name is cursor-vscode", () => {
-    const signal = detectPlatform({ name: "cursor-vscode", version: "1.0" });
-    expect(signal.platform).toBe("cursor");
-    expect(signal.confidence).toBe("high");
   });
 
   it("clientInfo takes priority over env vars", () => {
@@ -297,40 +206,9 @@ describe("detectPlatform", () => {
     expect(signal.platform).toBe("claude-code");
   });
 
-  // ── JetBrains Copilot ────────────────────────────────────
-
-  it("detects jetbrains-copilot via IDEA_INITIAL_DIRECTORY env var", () => {
-    process.env.IDEA_INITIAL_DIRECTORY = "/home/user/project";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("jetbrains-copilot");
-    expect(signal.confidence).toBe("high");
-  });
-
-  // IDEA_HOME and JETBRAINS_CLIENT_ID were previously listed but are NOT
-  // verifiable in any JetBrains source repo — removed from PLATFORM_ENV_VARS.
-  // IDEA_INITIAL_DIRECTORY (set by JetBrains launcher) is the sole remaining
-  // env var detection signal for jetbrains-copilot. Detection of JB IDE
-  // installations also still works via ~/.config/JetBrains/ config-dir tier.
-
-  // ── Qwen Code ──────────────────────────────────────────
-
-  it("detects qwen-code via QWEN_PROJECT_DIR env var", () => {
-    process.env.QWEN_PROJECT_DIR = "/some/project";
-    const signal = detectPlatform();
-    expect(signal.platform).toBe("qwen-code");
-    expect(signal.confidence).toBe("high");
-  });
-
-  it("detects qwen-code via qwen-cli-mcp-client pattern in clientInfo", () => {
-    const signal = detectPlatform({ name: "qwen-cli-mcp-client-context-mode" });
-    expect(signal.platform).toBe("qwen-code");
-    expect(signal.confidence).toBe("high");
-  });
-
   // ── Fallback ───────────────────────────────────────────
 
   it("returns a valid platform as default when no env vars are set", () => {
-    // No env vars set — result depends on which config dirs exist on this machine.
     const signal = detectPlatform();
     expect(["claude-code", "gemini-cli", "codex", "cursor", "opencode", "kilo", "openclaw", "vscode-copilot", "antigravity", "kiro", "pi", "zed", "qwen-code", "jetbrains-copilot"]).toContain(signal.platform);
   });
@@ -341,66 +219,14 @@ describe("detectPlatform", () => {
 // ─────────────────────────────────────────────────────────
 
 describe("getAdapter", () => {
-  it("returns ClaudeCodeAdapter for claude-code", async () => {
-    const adapter = await getAdapter("claude-code");
-    expect(adapter).toBeInstanceOf(ClaudeCodeAdapter);
-  });
-
-  it("returns GeminiCLIAdapter for gemini-cli", async () => {
-    const adapter = await getAdapter("gemini-cli");
-    expect(adapter).toBeInstanceOf(GeminiCLIAdapter);
-  });
-
-  it("returns OpenCodeAdapter for opencode", async () => {
-    const adapter = await getAdapter("opencode");
-    expect(adapter).toBeInstanceOf(OpenCodeAdapter);
-  });
-
-  it("returns OpenCodeAdapter for kilo", async () => {
-    const adapter = await getAdapter("kilo");
-    expect(adapter).toBeInstanceOf(OpenCodeAdapter);
-    expect(adapter.name).toBe("KiloCode");
-  });
-
-  it("returns OpenClawAdapter for openclaw", async () => {
-    const adapter = await getAdapter("openclaw");
-    expect(adapter).toBeInstanceOf(OpenClawAdapter);
-  });
-
-  it("returns CodexAdapter for codex", async () => {
-    const adapter = await getAdapter("codex");
-    expect(adapter).toBeInstanceOf(CodexAdapter);
-  });
-
-  it("returns VSCodeCopilotAdapter for vscode-copilot", async () => {
-    const adapter = await getAdapter("vscode-copilot");
-    expect(adapter).toBeInstanceOf(VSCodeCopilotAdapter);
-  });
-
-  it("returns CursorAdapter for cursor", async () => {
-    const adapter = await getAdapter("cursor");
-    expect(adapter).toBeInstanceOf(CursorAdapter);
-  });
-
-  it("returns AntigravityAdapter for antigravity", async () => {
-    const adapter = await getAdapter("antigravity");
-    expect(adapter).toBeInstanceOf(AntigravityAdapter);
-  });
-
-  it("returns KiroAdapter for kiro", async () => {
-    const adapter = await getAdapter("kiro");
-    expect(adapter).toBeInstanceOf(KiroAdapter);
-  });
-
-  it("returns QwenCodeAdapter for qwen-code", async () => {
-    const adapter = await getAdapter("qwen-code");
-    expect(adapter).toBeInstanceOf(QwenCodeAdapter);
-  });
-
-  it("returns JetBrainsCopilotAdapter for jetbrains-copilot", async () => {
-    const adapter = await getAdapter("jetbrains-copilot");
-    expect(adapter).toBeInstanceOf(JetBrainsCopilotAdapter);
-  });
+  it.each(getAdapterSpecs)(
+    "returns $AdapterClass.name for $platform",
+    async ({ platform, AdapterClass, extraCheck }) => {
+      const adapter = await getAdapter(platform as any);
+      expect(adapter).toBeInstanceOf(AdapterClass);
+      extraCheck?.(adapter);
+    },
+  );
 
   it("returns ClaudeCodeAdapter for unknown platform", async () => {
     const adapter = await getAdapter("unknown" as any);

@@ -3,6 +3,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, symlinkSync } fr
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, type ChildProcess } from "node:child_process";
+
+declare const Bun: undefined | { serve: (...args: unknown[]) => unknown };
 import Database from "better-sqlite3";
 
 const ROOT = resolve(import.meta.dirname, "../..");

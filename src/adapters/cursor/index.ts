@@ -19,6 +19,7 @@ import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 
 import { BaseAdapter } from "../base.js";
+import { normalizeSessionSource, upsertHookEntry } from "../shared.js";
 
 import type {
   HookAdapter,
@@ -121,26 +122,9 @@ export class CursorAdapter extends BaseAdapter implements HookAdapter {
 
   parseSessionStartInput(raw: unknown): SessionStartEvent {
     const input = raw as CursorHookInput;
-    const rawSource = input.source ?? input.trigger ?? "startup";
-
-    let source: SessionStartEvent["source"];
-    switch (rawSource) {
-      case "compact":
-        source = "compact";
-        break;
-      case "resume":
-        source = "resume";
-        break;
-      case "clear":
-        source = "clear";
-        break;
-      default:
-        source = "startup";
-    }
-
     return {
       sessionId: this.extractSessionId(input),
-      source,
+      source: normalizeSessionSource(input.source ?? input.trigger),
       projectDir: this.getProjectDir(input),
       raw,
     };
@@ -417,7 +401,7 @@ export class CursorAdapter extends BaseAdapter implements HookAdapter {
     const hooks = (settings.hooks ?? {}) as Record<string, CursorHookCommandEntry[] | unknown>;
     const changes: string[] = [];
 
-    this.upsertHookEntry(hooks, CURSOR_HOOK_NAMES.PRE_TOOL_USE, {
+    this.upsertHookEntryShared(hooks, CURSOR_HOOK_NAMES.PRE_TOOL_USE, {
       type: "command",
       command: buildHookCommand(CURSOR_HOOK_NAMES.PRE_TOOL_USE),
       matcher: PRE_TOOL_USE_MATCHER_PATTERN,
@@ -425,28 +409,28 @@ export class CursorAdapter extends BaseAdapter implements HookAdapter {
       failClosed: false,
     }, changes);
 
-    this.upsertHookEntry(hooks, CURSOR_HOOK_NAMES.POST_TOOL_USE, {
+    this.upsertHookEntryShared(hooks, CURSOR_HOOK_NAMES.POST_TOOL_USE, {
       type: "command",
       command: buildHookCommand(CURSOR_HOOK_NAMES.POST_TOOL_USE),
       loop_limit: null,
       failClosed: false,
     }, changes);
 
-    this.upsertHookEntry(hooks, CURSOR_HOOK_NAMES.SESSION_START, {
+    this.upsertHookEntryShared(hooks, CURSOR_HOOK_NAMES.SESSION_START, {
       type: "command",
       command: buildHookCommand(CURSOR_HOOK_NAMES.SESSION_START),
       loop_limit: null,
       failClosed: false,
     }, changes);
 
-    this.upsertHookEntry(hooks, CURSOR_HOOK_NAMES.STOP, {
+    this.upsertHookEntryShared(hooks, CURSOR_HOOK_NAMES.STOP, {
       type: "command",
       command: buildHookCommand(CURSOR_HOOK_NAMES.STOP),
       loop_limit: null,
       failClosed: false,
     }, changes);
 
-    this.upsertHookEntry(hooks, CURSOR_HOOK_NAMES.AFTER_AGENT_RESPONSE, {
+    this.upsertHookEntryShared(hooks, CURSOR_HOOK_NAMES.AFTER_AGENT_RESPONSE, {
       type: "command",
       command: buildHookCommand(CURSOR_HOOK_NAMES.AFTER_AGENT_RESPONSE),
       loop_limit: null,
@@ -530,24 +514,18 @@ export class CursorAdapter extends BaseAdapter implements HookAdapter {
     return compatPaths.some((configPath) => existsSync(configPath));
   }
 
-  private upsertHookEntry(
+  private upsertHookEntryShared(
     hooks: Record<string, CursorHookCommandEntry[] | unknown>,
     hookType: HookType,
     entry: CursorHookCommandEntry,
     changes: string[],
   ): void {
-    const existingRaw = hooks[hookType];
-    const existing = Array.isArray(existingRaw) ? [...existingRaw] as CursorHookCommandEntry[] : [];
-    const idx = existing.findIndex((candidate) => isContextModeHook(candidate, hookType));
-
-    if (idx >= 0) {
-      existing[idx] = entry;
-      changes.push(`Updated existing ${hookType} hook entry`);
-    } else {
-      existing.push(entry);
-      changes.push(`Added ${hookType} hook entry`);
-    }
-
-    hooks[hookType] = existing;
+    upsertHookEntry(
+      hooks,
+      hookType,
+      entry as unknown as Record<string, unknown>,
+      changes,
+      (candidate) => isContextModeHook(candidate as unknown as CursorHookCommandEntry, hookType),
+    );
   }
 }

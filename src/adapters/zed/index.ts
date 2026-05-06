@@ -1,13 +1,12 @@
 /**
  * adapters/zed — Zed editor platform adapter.
  *
- * Implements HookAdapter for Zed's MCP-only paradigm.
+ * Extends McpOnlyBaseAdapter (MCP-only, no hooks).
  *
- * Zed hook specifics:
+ * Zed specifics:
  *   - NO hook support — Zed is an editor, not a CLI with hook pipelines
  *   - Config: ~/.config/zed/settings.json (JSON format)
  *   - MCP: full support via context_servers section in settings.json
- *   - All capabilities are false — MCP is the only integration path
  *   - Session dir: ~/.config/zed/context-mode/sessions/
  */
 
@@ -20,84 +19,22 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
-import { BaseAdapter } from "../base.js";
+import { McpOnlyBaseAdapter } from "../mcp-only-base.js";
 
 import type {
-  HookAdapter,
-  HookParadigm,
-  PlatformCapabilities,
   DiagnosticResult,
-  PreToolUseEvent,
-  PostToolUseEvent,
-  PreCompactEvent,
-  SessionStartEvent,
-  PreToolUseResponse,
-  PostToolUseResponse,
-  PreCompactResponse,
-  SessionStartResponse,
-  HookRegistration,
 } from "../types.js";
 
 // ─────────────────────────────────────────────────────────
 // Adapter implementation
 // ─────────────────────────────────────────────────────────
 
-export class ZedAdapter extends BaseAdapter implements HookAdapter {
+export class ZedAdapter extends McpOnlyBaseAdapter {
   constructor() {
     super([".config", "zed"]);
   }
 
   readonly name = "Zed";
-  readonly paradigm: HookParadigm = "mcp-only";
-
-  readonly capabilities: PlatformCapabilities = {
-    preToolUse: false,
-    postToolUse: false,
-    preCompact: false,
-    sessionStart: false,
-    canModifyArgs: false,
-    canModifyOutput: false,
-    canInjectSessionContext: false,
-  };
-
-  // ── Input parsing ──────────────────────────────────────
-  // Zed does not support hooks. These methods exist to satisfy the
-  // interface contract but will throw if called.
-
-  parsePreToolUseInput(_raw: unknown): PreToolUseEvent {
-    throw new Error("Zed does not support hooks");
-  }
-
-  parsePostToolUseInput(_raw: unknown): PostToolUseEvent {
-    throw new Error("Zed does not support hooks");
-  }
-
-  parsePreCompactInput(_raw: unknown): PreCompactEvent {
-    throw new Error("Zed does not support hooks");
-  }
-
-  parseSessionStartInput(_raw: unknown): SessionStartEvent {
-    throw new Error("Zed does not support hooks");
-  }
-
-  // ── Response formatting ────────────────────────────────
-  // Zed does not support hooks. Return undefined for all responses.
-
-  formatPreToolUseResponse(_response: PreToolUseResponse): unknown {
-    return undefined;
-  }
-
-  formatPostToolUseResponse(_response: PostToolUseResponse): unknown {
-    return undefined;
-  }
-
-  formatPreCompactResponse(_response: PreCompactResponse): unknown {
-    return undefined;
-  }
-
-  formatSessionStartResponse(_response: SessionStartResponse): unknown {
-    return undefined;
-  }
 
   // ── Configuration ──────────────────────────────────────
 
@@ -107,11 +44,6 @@ export class ZedAdapter extends BaseAdapter implements HookAdapter {
 
   getInstructionFiles(): string[] {
     return ["AGENTS.md"];
-  }
-
-  generateHookConfig(_pluginRoot: string): HookRegistration {
-    // Zed does not support hooks — return empty registration
-    return {};
   }
 
   readSettings(): Record<string, unknown> | null {
@@ -186,23 +118,6 @@ export class ZedAdapter extends BaseAdapter implements HookAdapter {
   getInstalledVersion(): string {
     // Zed has no marketplace or plugin system for context-mode
     return "not installed";
-  }
-
-  // ── Upgrade ────────────────────────────────────────────
-
-  configureAllHooks(_pluginRoot: string): string[] {
-    // Zed does not support hooks — nothing to configure
-    return [];
-  }
-
-
-  setHookPermissions(_pluginRoot: string): string[] {
-    // No hook scripts for Zed
-    return [];
-  }
-
-  updatePluginRegistry(_pluginRoot: string, _version: string): void {
-    // Zed has no plugin registry
   }
 
   getRoutingInstructions(): string {

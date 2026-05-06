@@ -31,6 +31,7 @@ import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 
 import { BaseAdapter } from "../base.js";
+import { normalizeSessionSource, upsertHookEntry } from "../shared.js";
 
 import type {
   HookAdapter,
@@ -132,26 +133,9 @@ export class GeminiCLIAdapter extends BaseAdapter implements HookAdapter {
 
   parseSessionStartInput(raw: unknown): SessionStartEvent {
     const input = raw as GeminiCLIHookInput;
-    const rawSource = input.source ?? "startup";
-
-    let source: SessionStartEvent["source"];
-    switch (rawSource) {
-      case "compact":
-        source = "compact";
-        break;
-      case "resume":
-        source = "resume";
-        break;
-      case "clear":
-        source = "clear";
-        break;
-      default:
-        source = "startup";
-    }
-
     return {
       sessionId: this.extractSessionId(input),
-      source,
+      source: normalizeSessionSource(input.source),
       projectDir: this.getProjectDir(input),
       raw,
     };
@@ -454,31 +438,16 @@ export class GeminiCLIAdapter extends BaseAdapter implements HookAdapter {
 
     for (const config of hookConfigs) {
       const command = buildGeminiHookCommand(config.name as GeminiHookType, pluginRoot);
-      const entry = {
-        matcher: "",
-        hooks: [{ type: "command", command }],
-      };
-
-      const existing = hooks[config.name] as
-        | Array<Record<string, unknown>>
-        | undefined;
-      if (existing && Array.isArray(existing)) {
-        const idx = existing.findIndex((e) => {
-          const entryHooks = e.hooks as Array<{ command?: string }> | undefined;
-          return entryHooks?.some((h) => h.command?.includes("context-mode"));
-        });
-        if (idx >= 0) {
-          existing[idx] = entry;
-          changes.push(`Updated existing ${config.name} hook entry`);
-        } else {
-          existing.push(entry);
-          changes.push(`Added ${config.name} hook entry`);
-        }
-        hooks[config.name] = existing;
-      } else {
-        hooks[config.name] = [entry];
-        changes.push(`Created ${config.name} hooks section`);
-      }
+      upsertHookEntry(
+        hooks,
+        config.name,
+        { matcher: "", hooks: [{ type: "command", command }] },
+        changes,
+        (candidate) => {
+          const entryHooks = (candidate as { hooks?: Array<{ command?: string }> }).hooks;
+          return entryHooks?.some((h) => h.command?.includes("context-mode")) ?? false;
+        },
+      );
     }
 
     settings.hooks = hooks;

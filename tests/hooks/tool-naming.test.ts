@@ -397,7 +397,7 @@ describe("routePreToolUse with platform parameter", () => {
 
 // ─── SLICE Qwen-1: sessionstart platform-aware tool namer ───
 describe("sessionstart detectPlatformFromEnv", () => {
-  let detectPlatformFromEnv: (env?: Record<string, string | undefined>) => string;
+  let detectPlatformFromEnv: (env?: Record<string, string | undefined>) => string | string[];
 
   beforeAll(async () => {
     const mod = await import("../../hooks/core/platform-detect.mjs");
