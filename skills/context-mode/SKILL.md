@@ -57,11 +57,11 @@ About to run a command / read a file / call an API?
 │       ⚠ browser_navigate returns a snapshot automatically — ignore it,
 │         use browser_snapshot(filename) for any inspection.
 │       ⚠ Playwright MCP uses a SINGLE browser instance — NOT parallel-safe.
-│         For parallel browser ops, use agent-browser via execute instead.
+│         For parallel browser ops, use agent-browser via ctx_execute instead.
 │
 ├── Using agent-browser (parallel-safe browser automation)?
-│   └── Run via execute (shell) — each call gets its own subprocess:
-│       execute("agent-browser open example.com && agent-browser snapshot -i -c")
+│   └── Run via ctx_execute (shell) — each call gets its own subprocess:
+│       ctx_execute("agent-browser open example.com && agent-browser snapshot -i -c")
 │       ✓ Supports sessions for isolated browser instances
 │       ✓ Safe for parallel subagent execution
 │       ✓ Lightweight accessibility tree with ref-based interaction
