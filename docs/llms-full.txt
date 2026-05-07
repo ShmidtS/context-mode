@@ -1,6 +1,6 @@
 # context-mode
 
-> An MCP (Model Context Protocol) server and Claude Code plugin that solves context window flooding. Version 0.9.22 achieves ~98% context reduction (315 KB to 5.4 KB) by keeping raw tool outputs in isolated subprocesses and indexing them into SQLite FTS5 with BM25 ranking. Large command outputs, log files, API responses, and documentation never enter the context window -- only concise summaries and search results do.
+> An MCP (Model Context Protocol) server and Claude Code plugin that solves context window flooding. Version 1.2.1 achieves ~98% context reduction (315 KB to 5.4 KB) by keeping raw tool outputs in isolated subprocesses and indexing them into SQLite FTS5 with BM25 ranking. Large command outputs, log files, API responses, and documentation never enter the context window -- only concise summaries and search results do.
 
 ## Architecture Overview
 
@@ -10,12 +10,20 @@ context-mode operates as a Claude Code plugin that intercepts data-heavy tool ca
 
 | File | Lines | Responsibility |
 |------|-------|----------------|
-| `src/server.ts` | ~1358 | MCP server, 6 tool definitions, session stats, intent search |
+| `src/server.ts` | ~1358 | MCP server, 18 tool definitions, session stats, intent search |
 | `src/store.ts` | ~1075 | FTS5 knowledge base, chunking strategies, search with fallback |
 | `src/executor.ts` | ~437 | Polyglot subprocess execution, output truncation, sandbox |
 | `src/security.ts` | ~557 | Deny/allow policies, shell-escape detection, pattern matching |
 | `src/runtime.ts` | ~293 | Runtime detection, language dispatch, fallback chains |
 | `src/cli.ts` | ~898 | CLI setup, doctor diagnostics, upgrade |
+| `src/tools/context-stream.ts` | ~380 | Semantic search, embeddings, context pack |
+| `src/tools/vault.ts` | ~120+ | Vault index, vault graph traversal |
+| `src/tools/codegraph.ts` | ~215 | Dead code, complexity, dependency graph |
+| `src/tools/connectors.ts` | ~159 | GitHub, Notion, Slack connectors (Phase 1 stub) |
+| `src/search/` | 5 files | Unified search, vector store, hybrid search, embedding, context packer |
+| `src/vault/` | 10 files | Obsidian vault parser, AST parser, symbol graph, indexer |
+| `src/analysis/` | 3 files | DeadCodeAnalyzer, ComplexityAnalyzer, GraphVisualizer |
+| `src/connectors/` | 5 files | GitHub, Notion, Slack connectors + registry |
 | `hooks/pretooluse.mjs` | PreToolUse hook -- intercepts tools, security checks, routing |
 | `hooks/sessionstart.mjs` | SessionStart hook -- injects routing rules at session start |
 | `hooks/routing-block.mjs` | Shared XML routing block for hooks |
@@ -23,7 +31,17 @@ context-mode operates as a Claude Code plugin that intercepts data-heavy tool ca
 
 ## MCP Tools
 
-context-mode exposes 6 MCP tools. All tool names are prefixed with `mcp__plugin_context-mode_context-mode__` when called from Claude Code.
+context-mode exposes 18 MCP tools across 6 categories. All tool names are prefixed with `mcp__plugin_context-mode_context-mode__` when called from Claude Code.
+
+| Category | Tools |
+|----------|-------|
+| Core Execution | `execute`, `execute_file`, `batch_execute` |
+| Knowledge Base | `index`, `search` |
+| Administration | `fetch_and_index`, `stats`, `doctor`, `upgrade`, `purge`, `insight` |
+| Semantic Search | `semantic_search`, `index_embeddings`, `context_pack` |
+| Vault Graph | `vault_index`, `vault_graph` |
+| Code Analysis | `dead_code`, `complexity`, `dep_graph` |
+| Connectors (Phase 1 stub) | `connector_add`, `connector_sync`, `connector_list` |
 
 ### execute
 
@@ -208,6 +226,188 @@ batch_execute({
 **Output cap:** 80 KB total for search results (`MAX_OUTPUT = 80 * 1024`). Queries exceeding this cap return "(output cap reached)" messages with instructions to use `search()` for follow-up.
 
 **Security:** Each command in the batch is individually checked against Bash deny patterns.
+
+### semantic_search
+
+Searches indexed content using vector similarity via Ollama embeddings. Requires Ollama running with an embedding model (default: `nomic-embed-text`).
+
+```
+semantic_search({
+  query: string,           // natural language query
+  limit?: number,          // max results, default 5
+  contentType?: string,     // filter by content type (e.g., "markdown", "code")
+  minSimilarity?: number,   // similarity threshold 0-1, default 0.7
+  model?: string,          // Ollama embedding model name
+  host?: string,           // Ollama API host, default "http://localhost:11434"
+  apiKey?: string          // optional API key for remote Ollama
+})
+```
+
+**Return behavior:**
+- Returns matching chunks with similarity scores, source labels, and content previews.
+- Falls back to BM25 search if vector store is empty or Ollama is unreachable.
+
+### index_embeddings
+
+Builds a vector embedding index for all (or specified) content in the knowledge base. Incremental — skips already-indexed content unless `force: true`.
+
+```
+index_embeddings({
+  vaultPath?: string,      // path to vault to index; if omitted, re-indexes existing KB content
+  model?: string,          // Ollama embedding model, default "nomic-embed-text"
+  host?: string,           // Ollama API host, default "http://localhost:11434"
+  apiKey?: string,         // optional API key
+  force?: boolean          // re-index even if already embedded
+})
+```
+
+**Return behavior:**
+- Returns count of indexed chunks and embedding model used.
+- Stores vectors in a SQLite vector extension table alongside the FTS5 chunks.
+
+### context_pack
+
+Packs relevant context from the knowledge base into a single string optimized for LLM consumption within a token budget.
+
+```
+context_pack({
+  query: string,           // what context is needed
+  tokenBudget?: number,    // max tokens to return, default 4000
+  sources?: string[]      // restrict to specific source labels
+})
+```
+
+**Strategy:**
+1. Runs BM25 search for the query.
+2. Runs semantic search if embeddings are available.
+3. Merges and deduplicates results.
+4. Truncates to fit token budget, preserving code blocks and heading hierarchy.
+
+### vault_index
+
+Indexes an Obsidian vault into a searchable graph store. Scans markdown notes, extracts wiki-links (`[[...]]`), tags (`#tag`), and frontmatter.
+
+```
+vault_index({
+  vaultPath: string,       // absolute path to Obsidian vault
+  options?: {
+    reindex?: boolean      // force full reindex if true
+  }
+})
+```
+
+**Return behavior:**
+- Returns node count, edge count, and tag inventory.
+- Stores notes as graph nodes (type: `note`, `tag`, `attachment`).
+- Stores wiki-links as edges with type `wikilink`, tags as edges with type `tag`.
+
+### vault_graph
+
+Traverses the indexed vault graph using three traversal modes.
+
+```
+vault_graph({
+  mode: "neighbors" | "backlinks" | "tag-cluster",
+  nodePath?: string,       // starting note path (for neighbors/backlinks)
+  tag?: string,            // starting tag (for tag-cluster)
+  limit?: number,          // max nodes to return, default 20
+  edgeType?: string        // filter edges: "wikilink", "tag", "import", or omit for all
+})
+```
+
+**Modes:**
+- `neighbors`: N-hop BFS from `nodePath` following outgoing edges.
+- `backlinks`: Reverse BFS — who links *to* `nodePath`.
+- `tag-cluster`: Returns all notes sharing `tag` and their interconnections.
+
+### dead_code
+
+Analyzes the codebase for unreachable (dead) code. Identifies functions, classes, and modules never referenced from configured entry points.
+
+```
+dead_code({
+  vaultPath?: string,      // project root; defaults to current workspace
+  entryPoints?: string[],   // glob patterns for entry points (e.g., ["src/index.ts"])
+  includeTests?: boolean    // include test files as entry points
+})
+```
+
+**Return behavior:**
+- Returns a list of unreachable symbols with file paths and line numbers.
+- Uses static analysis over the vault graph and import edges.
+
+### complexity
+
+Computes cyclomatic complexity for code symbols and returns those exceeding a threshold.
+
+```
+complexity({
+  vaultPath?: string,      // project root; defaults to current workspace
+  threshold?: number,      // min complexity to report, default 10
+  sortBy?: "complexity" | "name" | "file"  // sort order
+})
+```
+
+**Return behavior:**
+- Returns symbol name, file, line, and complexity score.
+- Supports TypeScript, JavaScript, and Python via tree-sitter parsers.
+
+### dep_graph
+
+Generates a dependency graph visualization for the codebase.
+
+```
+dep_graph({
+  vaultPath?: string,      // project root; defaults to current workspace
+  format?: "dot" | "mermaid" | "html",  // output format, default "mermaid"
+  edgeTypes?: string[],     // filter edge types (e.g., ["import", "extends"])
+  maxNodes?: number,       // cap graph size, default 200
+  outputPath?: string      // write to file instead of returning string
+})
+```
+
+**Return behavior:**
+- Returns the graph string in the requested format.
+- `dot`: Graphviz DOT language.
+- `mermaid`: Mermaid flowchart syntax.
+- `html`: Self-contained HTML page with D3 or Cytoscape render.
+
+### connector_add
+
+Registers an external connector (GitHub, Notion, Slack) for syncing content into the knowledge graph.
+
+```
+connector_add({
+  type: "github" | "notion" | "slack",
+  config: object           // connector-specific configuration (tokens, workspace IDs, etc.)
+})
+```
+
+**Status:** Phase 1 stub — registers the connector but full sync requires registry integration (planned).
+
+### connector_sync
+
+Syncs content from a registered connector into the knowledge graph.
+
+```
+connector_sync({
+  connectorId: string,     // ID returned by connector_add
+  force?: boolean          // force full re-sync
+})
+```
+
+**Status:** Phase 1 stub — returns a placeholder indicating registry integration is required.
+
+### connector_list
+
+Lists all registered connectors with their sync status.
+
+```
+connector_list({})
+```
+
+**Return behavior:**
+- Returns array of connectors with `id`, `type`, `config` (redacted tokens), `lastSync`, `status`.
 
 ### stats
 
@@ -632,39 +832,22 @@ Emits XML routing rules as `additionalContext` at session start. Registered with
 
 ## Skills
 
-context-mode ships 4 skills:
+context-mode ships 11 skills:
 
-### context-mode (primary skill)
-
-The main skill providing workflow instructions for the execute/index/search pipeline. Contains tool selection hierarchy, usage patterns, and best practices for context-efficient workflows.
-
-### ctx-doctor
-
-Diagnostic skill that checks:
-- Runtime availability for all 11 languages
-- FTS5 SQLite extension availability
-- Hook registration and paths
-- Plugin registration in `installed_plugins.json`
-- npm/marketplace version comparison
-- Settings file existence and content
-
-### ctx-stats
-
-Reports session statistics:
-- Bytes returned to context (per-tool breakdown)
-- Bytes indexed in FTS5
-- Bytes sandboxed (network I/O)
-- Context savings ratio and reduction percentage
-- Call counts per tool
-- Estimated token usage
-
-### ctx-upgrade
-
-Self-update from GitHub:
-- Fetches latest version from npm registry or GitHub releases
-- Downloads and installs to the plugin cache directory
-- Rebuilds TypeScript if needed
-- Updates hooks and settings paths
+| Skill | Trigger | Purpose |
+|-------|---------|---------|
+| `context-mode` | automatic | Primary skill — tool selection hierarchy, routing rules, usage patterns, and best practices for context-efficient workflows. |
+| `ctx-doctor` | `/context-mode:ctx-doctor` | Diagnostic skill — checks runtime availability for all 11 languages, FTS5 SQLite extension, hook registration, plugin registration, npm/marketplace versions, and settings files. |
+| `ctx-stats` | `/context-mode:ctx-stats` | Reports session statistics — bytes returned, bytes indexed, bytes sandboxed, savings ratio, reduction percentage, call counts, and estimated token usage. |
+| `ctx-upgrade` | `/context-mode:ctx-upgrade` | Self-update from GitHub — fetches latest version, downloads and installs to plugin cache, rebuilds TypeScript, updates hooks and settings paths. |
+| `ctx-purge` | `/context-mode:ctx-purge` | Permanently deletes all indexed content and session data from the knowledge base. Irreversible. |
+| `ctx-insight` | `/context-mode:ctx-insight` | Opens an analytics dashboard in the browser (localhost:4747) showing personal metrics: session activity, tool usage, error rate, parallel work patterns, project focus, and actionable insights. |
+| `context-mode-ops` | manual | Parallel subagent army for GitHub issues, PRs, releases, and marketing. Orchestrates 10-20 dynamic agents per task. |
+| `grill-me` | "grill me" | Socratic interview skill for plan/design stress-testing. |
+| `grill-with-docs` | manual | Grilling against domain model + inline doc updates (CONTEXT.md, ADRs). |
+| `diagnose` | "diagnose this" | 6-phase disciplined diagnosis loop for hard bugs. |
+| `tdd` | "TDD" | Test-driven development with red-green-refactor, vertical slices. |
+| `improve-codebase-architecture` | manual | Surfaces deepening opportunities informed by domain glossary + ADRs. |
 
 ## Plugin Registration
 
@@ -673,8 +856,8 @@ Self-update from GitHub:
 ```json
 {
   "name": "context-mode",
-  "version": "0.9.22",
-  "description": "Claude Code MCP plugin that saves 98% of your context window.",
+  "version": "1.2.1",
+  "description": "Claude Code MCP plugin that saves 98% of your context window. Exposes 18 MCP tools, 11 skills, and supports 12 platforms.",
   "mcpServers": {
     "context-mode": {
       "command": "node",

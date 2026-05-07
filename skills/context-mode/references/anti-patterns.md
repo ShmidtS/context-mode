@@ -25,6 +25,43 @@ Just-use-Bash examples: `git status`, `ls -la`, `cat .env.example`, `pwd`, `wc -
 
 ---
 
+## 1a. Wrong Language for the Code Type
+
+The `language` parameter specifies the **runtime that executes the code**, not the shell you want to spawn. Passing shell commands as `language: "python"` causes a SyntaxError because Python tries to parse `cd /dir && python3 -c "..."` as Python code.
+
+```
+BAD:
+  Tool: ctx_execute
+  language: "python"
+  code: "cd e:/456/LLM-API-Key-Proxy && python3 -c \"import json; print(...)\""
+  // Python sees: cd e:/456/... && python3 -c "..."
+  // → SyntaxError: unterminated string literal
+
+GOOD:
+  Tool: ctx_execute
+  language: "shell"
+  code: "cd e:/456/LLM-API-Key-Proxy && python3 -c \"import json; print(...)\""
+  // Shell runs the command; python3 executes the inline script.
+
+ALSO GOOD (prefer):
+  Tool: ctx_execute
+  language: "python"
+  code: |
+    import json
+    with open('e:/456/LLM-API-Key-Proxy/data.json') as f:
+        data = json.load(f)
+    print(data)
+  // Pure Python code, no shell wrapping needed.
+```
+
+**Rule:**
+- Shell commands (pipes, `cd`, `&&`, `|`, `grep`, `find`) → `language: "shell"`
+- Python logic → `language: "python"`
+- JavaScript/TypeScript logic → `language: "javascript"` / `language: "typescript"`
+- Never mix: do NOT wrap a Python script in `python3 -c "..."` inside `language: "python"`.
+
+---
+
 ## 2. Forgetting to Print Output
 
 `ctx_execute` captures stdout. No print = empty summary.

@@ -2,8 +2,32 @@
   "id": "context-mode",
   "name": "Context Mode",
   "kind": "tool",
-  "description": "OpenClaw plugin that saves 98% of your context window. Sandboxed code execution in 11 languages, FTS5 knowledge base with BM25 ranking, and intent-driven search.",
+  "description": "MCP server and plugin that solves context window flooding. Version 1.2.1 achieves ~98% context reduction by sandboxing data processing into isolated subprocesses and indexing outputs into SQLite FTS5 with BM25 ranking. Exposes 18 MCP tools across 6 categories: core execution (execute, execute_file, batch_execute), knowledge base (index, search), administration (fetch_and_index, stats, doctor, upgrade, purge, insight), semantic search (semantic_search, index_embeddings, context_pack), vault graph (vault_index, vault_graph), and code analysis (dead_code, complexity, dep_graph). Supports 11 sandboxed languages, 12 IDE platforms, and 11 skills.",
   "version": "1.2.1",
+  "author": {
+    "name": "ShmidtS",
+    "url": "https://github.com/ShmidtS"
+  },
+  "homepage": "https://github.com/ShmidtS/context-mode#readme",
+  "repository": "https://github.com/ShmidtS/context-mode",
+  "license": "Elastic-2.0",
+  "keywords": [
+    "context-mode",
+    "mcp",
+    "context-window",
+    "sandbox",
+    "code-execution",
+    "fts5",
+    "bm25",
+    "semantic-search",
+    "ollama",
+    "obsidian",
+    "vault",
+    "code-analysis",
+    "dead-code",
+    "complexity",
+    "dependency-graph"
+  ],
   "sandbox": {
     "mode": "permissive",
     "filesystem_access": "full",
@@ -16,6 +40,21 @@
         "type": "boolean",
         "default": true,
         "description": "Enable or disable the context-mode plugin."
+      },
+      "semanticSearchHost": {
+        "type": "string",
+        "default": "http://localhost:11434",
+        "description": "Ollama API host for semantic search embeddings."
+      },
+      "semanticSearchModel": {
+        "type": "string",
+        "default": "nomic-embed-text",
+        "description": "Ollama embedding model for ctx_semantic_search and ctx_index_embeddings."
+      },
+      "vaultPath": {
+        "type": "string",
+        "default": "",
+        "description": "Absolute path to an Obsidian vault for ctx_vault_index / ctx_vault_graph."
       }
     },
     "additionalProperties": false

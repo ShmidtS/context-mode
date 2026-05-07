@@ -61,7 +61,7 @@ About to run a command / read a file / call an API?
 │
 ├── Using agent-browser (parallel-safe browser automation)?
 │   └── Run via ctx_execute (shell) — each call gets its own subprocess:
-│       ctx_execute("agent-browser open example.com && agent-browser snapshot -i -c")
+│       ctx_execute({ language: "shell", code: "agent-browser open example.com && agent-browser snapshot -i -c" })
 │       ✓ Supports sessions for isolated browser instances
 │       ✓ Safe for parallel subagent execution
 │       ✓ Lightweight accessibility tree with ref-based interaction

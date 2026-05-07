@@ -9,11 +9,15 @@
 
 ## Core Architecture
 
-- [server.ts](https://raw.githubusercontent.com/ShmidtS/context-mode/main/src/server.ts): MCP server entrypoint — registers tools, handles requests, wires up subsystems
+- [server.ts](https://raw.githubusercontent.com/ShmidtS/context-mode/main/src/server.ts): MCP server entrypoint — registers 18 tools, handles requests, wires up subsystems
 - [store.ts](https://raw.githubusercontent.com/ShmidtS/context-mode/main/src/store.ts): FTS5/BM25 knowledge base — indexes chunks, manages search, handles ephemeral storage
 - [executor.ts](https://raw.githubusercontent.com/ShmidtS/context-mode/main/src/executor.ts): Sandbox subprocess runner — executes code in isolation, captures output, enforces limits
 - [security.ts](https://raw.githubusercontent.com/ShmidtS/context-mode/main/src/security.ts): Security layer — validates inputs, enforces sandbox boundaries, blocks dangerous operations
 - [runtime.ts](https://raw.githubusercontent.com/ShmidtS/context-mode/main/src/runtime.ts): Runtime detection and language dispatch — routes execution to the correct interpreter
+- [tools/context-stream.ts](https://raw.githubusercontent.com/ShmidtS/context-mode/main/src/tools/context-stream.ts): Semantic search, embeddings, and context packing
+- [tools/vault.ts](https://raw.githubusercontent.com/ShmidtS/context-mode/main/src/tools/vault.ts): Obsidian vault indexing and graph traversal
+- [tools/codegraph.ts](https://raw.githubusercontent.com/ShmidtS/context-mode/main/src/tools/codegraph.ts): Dead code, complexity, and dependency graph analysis
+- [tools/connectors.ts](https://raw.githubusercontent.com/ShmidtS/context-mode/main/src/tools/connectors.ts): External connector registry (GitHub, Notion, Slack)
 
 ## Hook System
 
@@ -26,6 +30,14 @@
 - [ctx-doctor](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/ctx-doctor/SKILL.md): Diagnose plugin health — runtimes, FTS5, hooks, plugin registration, versions
 - [ctx-stats](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/ctx-stats/SKILL.md): Report context savings statistics and knowledge base utilization for the current session
 - [ctx-upgrade](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/ctx-upgrade/SKILL.md): Upgrade the plugin to the latest version and migrate configuration if needed
+- [ctx-purge](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/ctx-purge/SKILL.md): Permanently delete all indexed content and session data from the knowledge base
+- [ctx-insight](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/ctx-insight/SKILL.md): Open analytics dashboard in browser — personal metrics, tool usage, error rate, project focus
+- [context-mode-ops](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/context-mode-ops/SKILL.md): Parallel subagent army for GitHub issues, PRs, releases, and marketing
+- [grill-me](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/grill-me/SKILL.md): Socratic interview for plan/design stress-testing
+- [grill-with-docs](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/grill-with-docs/SKILL.md): Grilling against domain model + inline doc updates (CONTEXT.md, ADRs)
+- [diagnose](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/diagnose/SKILL.md): 6-phase disciplined diagnosis loop for hard bugs
+- [tdd](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/tdd/SKILL.md): Test-driven development with red-green-refactor, vertical slices
+- [improve-codebase-architecture](https://raw.githubusercontent.com/ShmidtS/context-mode/main/skills/improve-codebase-architecture/SKILL.md): Surface deepening opportunities informed by domain glossary + ADRs
 
 ## Configuration
 

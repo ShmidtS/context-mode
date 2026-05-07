@@ -44,7 +44,7 @@ Use `@context-mode/ctx_execute(language: "shell", code: "grep ...")` in sandbox.
 
 For multi-URL fetches or multi-API calls, **always** include `concurrency: N` (1-8):
 
-- `@context-mode/ctx_batch_execute(commands: [3+ network commands], concurrency: 5)` — gh, curl, dig, docker inspect, multi-region cloud queries
+- `@context-mode/ctx_batch_execute(commands: [{ label: "cmd1", command: "gh pr list" }, { label: "cmd2", command: "curl -s https://api.example.com/v1/status" }], queries: ["status"])` — gh, curl, dig, docker inspect, multi-region cloud queries
 - `@context-mode/ctx_fetch_and_index(requests: [{url, source}, ...], concurrency: 5)` — multi-URL batch fetch
 
 **Use concurrency 4-8** for I/O-bound work (network calls, API queries). **Keep concurrency 1** for CPU-bound (npm test, build, lint) or commands sharing state (ports, lock files, same-repo writes).
