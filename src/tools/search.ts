@@ -195,7 +195,6 @@ export function registerCtxIndex(
                 "  • ctx_index(content, source) — manually index text content\n\n" +
                 "After indexing, ctx_search becomes available for follow-up queries.",
             }],
-            isError: true,
           });
         }
 

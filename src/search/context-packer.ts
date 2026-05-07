@@ -36,14 +36,13 @@ export interface PackResult {
 // ─────────────────────────────────────────────────────────
 
 let _tiktokenEncoder: {
-  encode: (text: string) => number[]
+  encode: (text: string) => Uint32Array | number[]
   free: () => void
 } | null | undefined = undefined // undefined = not tried yet
 
 async function tryLoadTiktoken(): Promise<typeof _tiktokenEncoder> {
   if (_tiktokenEncoder !== undefined) return _tiktokenEncoder
   try {
-    // @ts-expect-error tiktoken may not be installed (optional runtime dep)
     const mod = await import('tiktoken')
     const encoding = mod.encoding_for_model('gpt-4')
     _tiktokenEncoder = encoding

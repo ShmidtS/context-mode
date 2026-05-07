@@ -35,7 +35,7 @@ export function registerVaultTools(
       }),
     },
     async (args) => {
-      const { vaultPath } = args;
+      const { vaultPath, options } = args;
 
       let stats;
       try {
@@ -84,7 +84,7 @@ export function registerVaultTools(
           const { VaultGraphStore } = await import("../vault/graph-store.js");
           const store = new VaultGraphStore(db);
           const adapter = createVaultAdapter(store, resolvedVaultPath);
-          const result = indexVault(resolvedVaultPath, adapter);
+          const result = indexVault(resolvedVaultPath, adapter, { reindex: options?.reindex });
 
           // Recalculate degrees for all indexed nodes
           const nodeIds = store.getNodeIdsByVaultPath(resolvedVaultPath);
@@ -145,8 +145,7 @@ export function registerVaultTools(
 
         if (isProjectVaultEmpty()) {
           return trackResponse("ctx_vault_graph", {
-            content: [{ type: "text" as const, text: "Vault graph is empty: this project contains no markdown notes with wiki-links, tags, or backlinks. Further ctx_vault_graph calls will not yield results." }],
-            isError: true,
+            content: [{ type: "text" as const, text: JSON.stringify([], null, 2) }],
           });
         }
 
@@ -161,8 +160,7 @@ export function registerVaultTools(
           const node = resolveNode(args.nodePath);
           if (!node) {
             return trackResponse("ctx_vault_graph", {
-              content: [{ type: "text" as const, text: `Node not found: ${args.nodePath}` }],
-              isError: true,
+              content: [{ type: "text" as const, text: JSON.stringify([], null, 2) }],
             });
           }
           results = search.neighbors(node.id, args.maxHops, args.edgeType).slice(0, args.limit);
@@ -170,8 +168,7 @@ export function registerVaultTools(
           const node = resolveNode(args.nodePath);
           if (!node) {
             return trackResponse("ctx_vault_graph", {
-              content: [{ type: "text" as const, text: `Node not found: ${args.nodePath}` }],
-              isError: true,
+              content: [{ type: "text" as const, text: JSON.stringify([], null, 2) }],
             });
           }
           results = search.backlinks(node.id, args.edgeType).slice(0, args.limit);

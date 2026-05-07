@@ -233,6 +233,8 @@ function collectSourceFiles(
 export interface IndexOpts {
   /** Directory names to exclude from traversal. Defaults to DEFAULT_EXCLUDE_DIRS. */
   excludePatterns?: string[];
+  /** Force full reindex even if mtime/contentHash match existing nodes. */
+  reindex?: boolean;
 }
 
 export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: IndexOpts): IndexResult {
@@ -260,7 +262,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
     }
 
     const existing = store.getNode(relPath);
-    if (existing && existing.mtimeMs === stat.mtimeMs) {
+    if (!opts?.reindex && existing && existing.mtimeMs === stat.mtimeMs) {
       result.skipped++;
       continue;
     }
@@ -274,7 +276,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
 
     const parsed = parseVaultNote(relPath, content);
 
-    if (existing && existing.contentHash === parsed.contentHash) {
+    if (!opts?.reindex && existing && existing.contentHash === parsed.contentHash) {
       store.upsertNode({ ...existing, mtimeMs: stat.mtimeMs });
       result.skipped++;
       continue;
@@ -316,7 +318,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
     }
 
     const existing = store.getNode(relPath);
-    if (existing && existing.mtimeMs === stat.mtimeMs) {
+    if (!opts?.reindex && existing && existing.mtimeMs === stat.mtimeMs) {
       result.skipped++;
       continue;
     }
@@ -331,7 +333,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
     const parsed = parseCodeFile(relPath, content, allPaths, vaultRoot);
     const contentHash = createHash("sha256").update(content).digest("hex");
 
-    if (existing && existing.contentHash === contentHash) {
+    if (!opts?.reindex && existing && existing.contentHash === contentHash) {
       store.upsertNode({ ...existing, mtimeMs: stat.mtimeMs });
       result.skipped++;
       continue;
@@ -376,7 +378,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
     }
 
     const existing = store.getNode(relPath);
-    if (existing && existing.mtimeMs === stat.mtimeMs) {
+    if (!opts?.reindex && existing && existing.mtimeMs === stat.mtimeMs) {
       result.skipped++;
       continue;
     }
@@ -385,7 +387,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
       .update(relPath + String(stat.mtimeMs))
       .digest("hex");
 
-    if (existing && existing.contentHash === contentHash) {
+    if (!opts?.reindex && existing && existing.contentHash === contentHash) {
       store.upsertNode({ ...existing, mtimeMs: stat.mtimeMs });
       result.skipped++;
       continue;
