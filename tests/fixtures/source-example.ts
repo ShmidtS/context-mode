@@ -1,3 +1,4 @@
+// @ts-nocheck — fixture file with external dependencies not installed in this project
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { PrismaClient, Prisma } from "@prisma/client";

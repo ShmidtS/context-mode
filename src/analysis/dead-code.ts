@@ -54,7 +54,7 @@ export class DeadCodeAnalyzer {
   // ── Schema ──
 
   ensureTables(): void {
-    const db = this.#store.db
+    const db = this.#store
     db.exec(`
       CREATE TABLE IF NOT EXISTS entry_points (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,7 +84,7 @@ export class DeadCodeAnalyzer {
   ): DeadCodeResult[] {
     this.ensureTables()
 
-    const db = this.#store.db
+    const db = this.#store
     const results: DeadCodeResult[] = []
 
     // Step 1: Resolve entry point node IDs
@@ -171,7 +171,7 @@ export class DeadCodeAnalyzer {
 
   addEntryPoint(vaultPath: string, notePath: string, reason = 'manual'): void {
     this.ensureTables()
-    const db = this.#store.db
+    const db = this.#store
     db.prepare(
       'INSERT OR IGNORE INTO entry_points (vault_path, note_path, reason) VALUES (?, ?, ?)'
     ).run(vaultPath, notePath, reason)
@@ -179,7 +179,7 @@ export class DeadCodeAnalyzer {
 
   removeEntryPoint(vaultPath: string, notePath: string): void {
     this.ensureTables()
-    const db = this.#store.db
+    const db = this.#store
     db.prepare(
       'DELETE FROM entry_points WHERE vault_path = ? AND note_path = ?'
     ).run(vaultPath, notePath)
@@ -187,7 +187,7 @@ export class DeadCodeAnalyzer {
 
   listEntryPoints(vaultPath: string): Array<{ notePath: string; reason: string }> {
     this.ensureTables()
-    const db = this.#store.db
+    const db = this.#store
     const rows = db.prepare(
       'SELECT note_path, reason FROM entry_points WHERE vault_path = ?'
     ).all(vaultPath) as Array<{ note_path: string; reason: string }>
@@ -220,25 +220,7 @@ export class DeadCodeAnalyzer {
 
   /** Get all vault nodes for a given vault path. */
   #getVaultNodes(vaultPath: string): VaultNode[] {
-    const db = this.#store.db
-    const rows = db.prepare(
-      'SELECT * FROM vault_nodes WHERE vault_path = ?'
-    ).all(vaultPath) as Array<Record<string, unknown>>
-    return rows.map((r) => ({
-      id: r.id as number,
-      vault_path: r.vault_path as string,
-      note_path: r.note_path as string,
-      title: r.title as string,
-      frontmatter: r.frontmatter as string | null,
-      content_hash: r.content_hash as string,
-      file_mtime: r.file_mtime as number,
-      out_degree: r.out_degree as number,
-      in_degree: r.in_degree as number,
-      source_id: r.source_id as number | null,
-      indexed_at: r.indexed_at as string,
-      source_type: r.source_type as string,
-      connector_meta: r.connector_meta as string | null,
-    }))
+    return this.#store.getNodesByVaultPath(vaultPath)
   }
 
   /** BFS from entry points following reachable edge types. */
@@ -325,7 +307,7 @@ export class DeadCodeAnalyzer {
 
   /** Store detection results in dead_code_results table. */
   #storeResults(vaultPath: string, results: DeadCodeResult[], allNodes: VaultNode[]): void {
-    const db = this.#store.db
+    const db = this.#store
 
     // Clear old results for this vault
     db.prepare('DELETE FROM dead_code_results WHERE vault_path = ?').run(vaultPath)

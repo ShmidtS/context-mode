@@ -98,6 +98,14 @@ export class VaultGraphStore {
   #stmtNodeCount!: PreparedStatement;
   #stmtEdgeCount!: PreparedStatement;
 
+  // Demeter-safe queries (replacing raw db access)
+  #stmtGetAllNodeIds!: PreparedStatement;
+  #stmtFindNodeByTitleLike!: PreparedStatement;
+  #stmtCountNodesByVaultPath!: PreparedStatement;
+  #stmtGetNodeIdsByVaultPath!: PreparedStatement;
+  #stmtGetNodeIdAndPathByVaultPath!: PreparedStatement;
+  #stmtGetNodeIdAndPathByVaultPathAndSourceType!: PreparedStatement;
+
   constructor(db: DatabaseInstance) {
     this.#db = db;
     this.#initSchema();
@@ -257,6 +265,26 @@ export class VaultGraphStore {
     );
     this.#stmtEdgeCount = this.#db.prepare(
       "SELECT COUNT(*) as count FROM vault_edges"
+    );
+
+    // Demeter-safe queries
+    this.#stmtGetAllNodeIds = this.#db.prepare(
+      "SELECT id FROM vault_nodes"
+    );
+    this.#stmtFindNodeByTitleLike = this.#db.prepare(
+      "SELECT id, in_degree FROM vault_nodes WHERE note_path LIKE ? LIMIT 1"
+    );
+    this.#stmtCountNodesByVaultPath = this.#db.prepare(
+      "SELECT COUNT(*) as cnt FROM vault_nodes WHERE vault_path = ?"
+    );
+    this.#stmtGetNodeIdsByVaultPath = this.#db.prepare(
+      "SELECT id FROM vault_nodes WHERE vault_path = ?"
+    );
+    this.#stmtGetNodeIdAndPathByVaultPath = this.#db.prepare(
+      "SELECT id, note_path FROM vault_nodes WHERE vault_path = ?"
+    );
+    this.#stmtGetNodeIdAndPathByVaultPathAndSourceType = this.#db.prepare(
+      "SELECT id, note_path FROM vault_nodes WHERE vault_path = ? AND source_type = ?"
     );
   }
 
@@ -434,11 +462,51 @@ export class VaultGraphStore {
     return row?.count ?? 0;
   }
 
-  // ── Raw DB access (for search module) ──
+  // ── Demeter-safe queries (replacing raw db access) ──
 
-  /** Expose the raw DB instance for search operations that need custom SQL. */
-  get db(): DatabaseInstance {
-    return this.#db;
+  /** Get all node IDs in the graph. */
+  getAllNodeIds(): number[] {
+    const rows = this.#stmtGetAllNodeIds.all() as Array<{ id: number }>;
+    return rows.map((r) => r.id);
+  }
+
+  /** Find a node by title substring in note_path. Returns {id, in_degree} or null. */
+  findNodeByTitleLike(pattern: string): { id: number; in_degree: number } | null {
+    const row = this.#stmtFindNodeByTitleLike.get(pattern) as { id: number; in_degree: number } | undefined;
+    return row ?? null;
+  }
+
+  /** Count nodes belonging to a specific vault path. */
+  countNodesByVaultPath(vaultPath: string): number {
+    const row = this.#stmtCountNodesByVaultPath.get(vaultPath) as { cnt: number } | undefined;
+    return row?.cnt ?? 0;
+  }
+
+  /** Get node IDs belonging to a specific vault path. */
+  getNodeIdsByVaultPath(vaultPath: string): Array<{ id: number }> {
+    return this.#stmtGetNodeIdsByVaultPath.all(vaultPath) as Array<{ id: number }>;
+  }
+
+  /** Get node id and note_path for a vault path. */
+  getNodeIdAndPathByVaultPath(vaultPath: string): Array<{ id: number; note_path: string }> {
+    return this.#stmtGetNodeIdAndPathByVaultPath.all(vaultPath) as Array<{ id: number; note_path: string }>;
+  }
+
+  /** Get node id and note_path for a vault path filtered by source_type. */
+  getNodeIdAndPathByVaultPathAndSourceType(vaultPath: string, sourceType: string): Array<{ id: number; note_path: string }> {
+    return this.#stmtGetNodeIdAndPathByVaultPathAndSourceType.all(vaultPath, sourceType) as Array<{ id: number; note_path: string }>;
+  }
+
+  // ── Auxiliary table support (for analysis modules) ──
+
+  /** Execute raw SQL (for schema creation of auxiliary tables). */
+  exec(sql: string): void {
+    this.#db.exec(sql);
+  }
+
+  /** Prepare a raw SQL statement (for auxiliary table operations). */
+  prepare(sql: string): PreparedStatement {
+    return this.#db.prepare(sql) as PreparedStatement;
   }
 
   // ── Row mappers ──

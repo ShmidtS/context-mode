@@ -14,7 +14,7 @@ import {
   hashProjectDir,
   extractSnippet,
   coerceJsonArray,
-  getSharedVaultStore,
+  acquireVaultStores,
   getProjectDir,
   _detectedAdapter,
   type ToolResult,
@@ -255,13 +255,7 @@ export function registerCtxIndex(
           } catch { /* SessionDB unavailable */ }
         }
 
-        let vaultStore: import("../vault/graph-store.js").VaultGraphStore | null = null;
-        let vaultSearch: import("../vault/search.js").VaultGraphSearch | null = null;
-        try {
-          const { store: vs, search: vs_ } = await getSharedVaultStore();
-          vaultStore = vs;
-          vaultSearch = vs_;
-        } catch { /* vault graph unavailable */ }
+        const { vaultStore, vaultSearch } = await acquireVaultStores();
 
         const detectedAdapter = _detectedAdapter;
         const configDir = detectedAdapter?.getConfigDir() ?? (process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"));

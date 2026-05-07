@@ -35,7 +35,10 @@ export type EventCategory =
   | "env" | "skill" | "constraint" | "subagent" | "mcp" | "mcp_tool_call"
   | "decision" | "agent-finding" | "external-ref" | "blocked-on" | "data"
   | "error-resolution" | "iteration-loop" | "intent" | "role"
-  | "prompt" | "user-prompt" | "openclaw" | "pi";
+  | "prompt" | "user-prompt" | "openclaw" | "pi"
+  | "tool" | "config" | "test" | "compaction" | "rejected-approach" | "session-resume"
+  | "status" | "deploy" | "log"
+  | "latency" | "permission";
 
 export interface SessionEvent {
   type: string;

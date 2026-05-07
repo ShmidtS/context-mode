@@ -7,25 +7,10 @@
 
 // ── Public interfaces ──────────────────────────────────────────────────────
 
-export interface SessionEvent {
-  /** e.g. "file_read", "file_write", "cwd", "error_tool", "git", "task",
-   *  "decision", "rule", "env", "role", "skill", "subagent", "data", "intent" */
-  type: string;
-  /** e.g. "file", "cwd", "error", "git", "task", "decision",
-   *  "rule", "env", "role", "skill", "subagent", "data", "intent" */
-  category: string;
-  /** Extracted payload — full data, no truncation */
-  data: string;
-  /** 1=critical (rules, files, tasks) … 5=low */
-  priority: number;
-}
+import type { SessionEvent as _SessionEvent } from "../types.js";
 
-export interface ToolCall {
-  toolName: string;
-  toolInput: Record<string, unknown>;
-  toolResponse?: string;
-  isError?: boolean;
-}
+/** Extracted event without data_hash (computed downstream by db.ts). */
+export type SessionEvent = Omit<_SessionEvent, "data_hash">;
 
 /**
  * Hook input shape as received from Claude Code PostToolUse hook stdin.

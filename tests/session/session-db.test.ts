@@ -13,6 +13,7 @@ import {
   renameCorruptDB,
   withRetry,
 } from "../../src/db-base.js";
+import type { SessionEvent } from "../../src/types.js";
 
 const cleanups: Array<() => void> = [];
 
@@ -35,13 +36,9 @@ function createTestDB(): SessionDB {
 }
 
 /** Create a minimal session event for testing. */
-function makeEvent(overrides: Partial<{
-  type: string;
-  category: string;
-  data: string;
-  priority: number;
-  data_hash: string;
-}> = {}) {
+function makeEvent(
+  overrides: Partial<Omit<SessionEvent, "data_hash"> & { data_hash?: string }> = {},
+): Omit<SessionEvent, "data_hash"> & { data_hash?: string } {
   return {
     type: overrides.type ?? "file",
     category: overrides.category ?? "file",
@@ -1202,8 +1199,8 @@ describe("compaction category", () => {
     db.ensureSession(sid, "/test/project");
 
     const event = {
-      type: "compaction_summary",
-      category: "compaction",
+      type: "compaction_summary" as const,
+      category: "compaction" as const,
       data: "Session compacted. 10 events, 3 files touched.",
       priority: 1,
       data_hash: "",

@@ -960,7 +960,7 @@ describe("buildAutoInjection", () => {
 
   test("token budget cap 500", () => {
     // Fill with many large events to test budget enforcement
-    const events = [];
+    const events: Array<{ category: string; data: string }> = [];
     for (let i = 0; i < 20; i++) {
       events.push({ category: "decision", data: "A".repeat(200) });
     }

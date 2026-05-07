@@ -4,14 +4,12 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from 'zod'
-import { trackResponse, getStore, getSharedVaultStore, getSessionDir, hashProjectDir, getWorktreeSuffix, getProjectDir, _detectedAdapter } from './shared.js'
-import { searchAllSources, type UnifiedSearchResult } from '../search/unified.js'
+import { trackResponse, getStore, acquireVaultStores, toolErrorResponse, getProjectDir, _detectedAdapter } from './shared.js'
+import { searchAllSources } from '../search/unified.js'
 import { ContextPacker } from '../search/context-packer.js'
 import { VectorStore } from '../search/vector-store.js'
-import { OllamaProvider, createEmbeddingProvider, type EmbeddingProvider } from '../search/embedding.js'
-import { SessionDB, getWorktreeSuffix as getSuffix } from '../session/db.js'
-import { existsSync, readdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { OllamaProvider, type EmbeddingProvider } from '../search/embedding.js'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const DEBUG = process.env.DEBUG?.includes('context-mode')
@@ -129,13 +127,7 @@ export function registerContextStreamTools(
 
         // Use UnifiedSearch with vector source enabled
         const store = getStore()
-        let vaultStore: import('../vault/graph-store.js').VaultGraphStore | null = null
-        let vaultSearch: import('../vault/search.js').VaultGraphSearch | null = null
-        try {
-          const { store: vs, search: vs_ } = await getSharedVaultStore()
-          vaultStore = vs
-          vaultSearch = vs_
-        } catch { /* vault graph unavailable */ }
+        const { vaultStore, vaultSearch } = await acquireVaultStores()
 
         const vectorStore = getSharedVectorStore()
         const allResults = await searchAllSources({
@@ -181,11 +173,7 @@ export function registerContextStreamTools(
           }, null, 2) }],
         })
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        return trackResponse('ctx_semantic_search', {
-          content: [{ type: 'text' as const, text: `Semantic search error: ${message}` }],
-          isError: true,
-        })
+        return trackResponse('ctx_semantic_search', toolErrorResponse('Semantic search', err))
       }
     },
   )
@@ -240,75 +228,41 @@ export function registerContextStreamTools(
 
         const vectorStore = getSharedVectorStore()
         const store = getStore()
-
-        // Get chunks from ContentStore — focus on code content
-        const sources = store.listSources()
         let indexed = 0
         let skipped = 0
 
-        for (const src of sources) {
-          // Get source metadata to check content_hash for incremental indexing
-          const meta = store.getSourceMeta(src.label)
-          if (!meta) continue
-
-          // Skip non-code sources unless they match the vaultPath
-          if (meta.codeChunkCount === 0 && !src.label.startsWith('code:')) {
-            // Still index prose chunks for semantic search completeness
-          }
-
-          const chunks = store.getChunksBySource(
-            // We need sourceId — get it from meta by re-querying
-            // ContentStore doesn't expose sourceId in listSources, so we iterate chunks by label
-            0, // placeholder — we'll use a different approach below
-          )
-
-          // Alternative: iterate all chunks via search with a broad query
-          // But that's expensive. Instead, re-index from the vault nodes.
-        }
-
         // Use VaultGraphStore to get content nodes for the vault path
-        try {
-          const { store: vaultStore } = await getSharedVaultStore()
+        const { vaultStore } = await acquireVaultStores()
+        if (vaultStore) {
           const nodes = vaultStore.getNodesByVaultPath(vaultPath)
 
           for (const node of nodes) {
-            // Check if already indexed (content_hash match) unless force
-            if (!force) {
-              const existingCount = vectorStore.count()
-              // Simple incremental check: if we already have vectors for this node, skip
-              // A proper content_hash check would query code_vectors table directly
-              // For Phase 2, we rely on the force flag
-              if (existingCount > 0 && node.content_hash) {
-                // Skip if not forcing — vectorStore doesn't expose content_hash query yet
-                // We'll index and let insertVector handle it (upsert pattern)
-              }
-            }
-
             // Get chunk content from ContentStore via source_id
             if (node.source_id) {
-              const chunks = store.getChunksBySource(node.source_id)
-              for (const chunk of chunks) {
-                const text = `${chunk.title}\n${chunk.content}`
-                const embedding = await provider.embed(text)
-                if (embedding) {
-                  const contentHash = node.content_hash || ''
-                  vectorStore.insertVector(
-                    node.id,
-                    undefined, // symbolId — not available at node level
-                    embedding,
-                    provider.name,
-                    contentHash,
-                  )
-                  indexed++
-                } else {
-                  skipped++
-                }
+            const chunks = store.getChunksBySource(node.source_id)
+            for (const chunk of chunks) {
+              const text = `${chunk.title}\n${chunk.content}`
+              const embedding = await provider.embed(text)
+              if (embedding) {
+                const contentHash = node.content_hash || ''
+                vectorStore.insertVector(
+                  node.id,
+                  undefined, // symbolId — not available at node level
+                  embedding,
+                  provider.name,
+                  contentHash,
+                )
+                indexed++
+              } else {
+                skipped++
               }
             }
           }
-        } catch (e) {
-          if (DEBUG) process.stderr.write(`[ctx] vault node indexing failed: ${e}\n`)
-          // Fallback: index from ContentStore sources directly
+        }
+
+        // Fallback: index from ContentStore sources directly when vault graph unavailable
+        if (!vaultStore) {
+          if (DEBUG) process.stderr.write('[ctx] vault node indexing failed: vault graph unavailable\n')
           const sources = store.listSources()
           for (const src of sources) {
             const meta = store.getSourceMeta(src.label)
@@ -329,7 +283,6 @@ export function registerContextStreamTools(
               const text = `${result.title}\n${result.content}`
               const embedding = await provider.embed(text)
               if (embedding) {
-                // Use a hash of the content as nodeId placeholder
                 const nodeId = Math.abs(text.length % 100000)
                 const contentHash = meta.contentHash || ''
                 vectorStore.insertVector(
@@ -346,6 +299,7 @@ export function registerContextStreamTools(
             }
           }
         }
+        }
 
         return trackResponse('ctx_index_embeddings', {
           content: [{ type: 'text' as const, text: JSON.stringify({
@@ -357,11 +311,7 @@ export function registerContextStreamTools(
           }, null, 2) }],
         })
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        return trackResponse('ctx_index_embeddings', {
-          content: [{ type: 'text' as const, text: `Embedding index error: ${message}` }],
-          isError: true,
-        })
+        return trackResponse('ctx_index_embeddings', toolErrorResponse('Embedding index', err))
       }
     },
   )
@@ -394,13 +344,7 @@ export function registerContextStreamTools(
         const packer = new ContextPacker(tokenBudget)
 
         // Search across all available sources
-        let vaultStore: import('../vault/graph-store.js').VaultGraphStore | null = null
-        let vaultSearch: import('../vault/search.js').VaultGraphSearch | null = null
-        try {
-          const { store: vs, search: vs_ } = await getSharedVaultStore()
-          vaultStore = vs
-          vaultSearch = vs_
-        } catch { /* vault graph unavailable */ }
+        const { vaultStore, vaultSearch } = await acquireVaultStores()
 
         const provider = await getSharedEmbeddingProvider()
         let vectorStore: VectorStore | null = null
@@ -451,11 +395,7 @@ export function registerContextStreamTools(
           }, null, 2) }],
         })
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        return trackResponse('ctx_context_pack', {
-          content: [{ type: 'text' as const, text: `Context pack error: ${message}` }],
-          isError: true,
-        })
+        return trackResponse('ctx_context_pack', toolErrorResponse('Context pack', err))
       }
     },
   )

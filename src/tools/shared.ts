@@ -45,6 +45,28 @@ export type ToolResult = {
   isError?: boolean;
 };
 
+/** Build a standardized error ToolResult for a named MCP tool. */
+export function toolErrorResponse(toolName: string, err: unknown): ToolResult {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    content: [{ type: "text" as const, text: `${toolName} error: ${message}` }],
+    isError: true,
+  };
+}
+
+/** Acquire the shared vault graph store pair, returning nulls on failure. */
+export async function acquireVaultStores(): Promise<{
+  vaultStore: import("../vault/graph-store.js").VaultGraphStore | null;
+  vaultSearch: import("../vault/search.js").VaultGraphSearch | null;
+}> {
+  try {
+    const { store, search } = await getSharedVaultStore();
+    return { vaultStore: store, vaultSearch: search };
+  } catch {
+    return { vaultStore: null, vaultSearch: null };
+  }
+}
+
 // ── Shared mutable state ───────────────────────────────────
 
 export let _detectedAdapter: HookAdapter | null = null;
@@ -62,7 +84,7 @@ export function setInsightChild(child: ChildProcess | null): void {
 let _store: ContentStore | null = null;
 
 // Shared vault graph store (same DB as ContentStore, separate connection)
-let _vaultStoreCache: { store: import("../vault/graph-store.js").VaultGraphStore; search: import("../vault/search.js").VaultGraphSearch; db: any } | null = null;
+let _vaultStoreCache: { store: import("../vault/graph-store.js").VaultGraphStore; search: import("../vault/search.js").VaultGraphSearch } | null = null;
 let _projectVaultIndexed = false;
 let _projectVaultEmpty = false;
 const DEBUG_VAULT = process.env.DEBUG?.includes("context-mode");
@@ -86,7 +108,6 @@ async function getVaultAdapter() {
 export async function getSharedVaultStore(): Promise<{
   store: import("../vault/graph-store.js").VaultGraphStore;
   search: import("../vault/search.js").VaultGraphSearch;
-  db: any;
 }> {
   if (_vaultStoreCache) return _vaultStoreCache;
 
@@ -97,26 +118,22 @@ export async function getSharedVaultStore(): Promise<{
   const { VaultGraphSearch } = await import("../vault/search.js");
   const store = new VaultGraphStore(db);
   const search = new VaultGraphSearch(store);
-  _vaultStoreCache = { store, search, db };
+  _vaultStoreCache = { store, search };
 
   // Auto-index current project as vault on first access (once per session)
   if (!_projectVaultIndexed && process.env.CTX_AUTO_INDEX_PROJECT !== "0") {
     _projectVaultIndexed = true;
     try {
       const projectDir = getProjectDir();
-      const row = store.db
-        .prepare("SELECT COUNT(*) as cnt FROM vault_nodes WHERE vault_path = ?")
-        .get(projectDir) as { cnt: number } | undefined;
-      if (!row || row.cnt === 0) {
+      const cnt = store.countNodesByVaultPath(projectDir);
+      if (cnt === 0) {
         const { indexVault } = await import("../vault/indexer.js");
         const { addVaultConfig } = await import("../vault/config.js");
         const createVaultAdapter = await getVaultAdapter();
         const adapter = createVaultAdapter(store, projectDir);
         const result = indexVault(projectDir, adapter);
         // Recalc degrees only for nodes belonging to this project
-        const nodeIds = store.db
-          .prepare("SELECT id FROM vault_nodes WHERE vault_path = ?")
-          .all(projectDir) as { id: number }[];
+        const nodeIds = store.getNodeIdsByVaultPath(projectDir);
         for (const { id } of nodeIds) {
           store.recalcDegrees(id);
         }
@@ -267,10 +284,7 @@ export function closeStore(): void {
 }
 
 export function resetVaultStore(): void {
-  if (_vaultStoreCache) {
-    try { _vaultStoreCache.db.close(); } catch {}
-    _vaultStoreCache = null;
-  }
+  _vaultStoreCache = null;
   _projectVaultIndexed = false;
   _projectVaultEmpty = false;
 }

@@ -296,14 +296,11 @@ function dragended(event, d) {
   } {
     const edgeTypes = options?.edgeTypes
     const allEdges = this.#store.getAllEdges()
-    const db = this.#store.db
 
     // Collect nodes for this vault
     const nodes = new Map<string, number>() // path -> id
     const nodeIdToPath = new Map<number, string>() // id -> path
-    const vaultNodeRows = db.prepare(
-      'SELECT id, note_path FROM vault_nodes WHERE vault_path = ?'
-    ).all(vaultPath) as Array<{ id: number; note_path: string }>
+    const vaultNodeRows = this.#store.getNodeIdAndPathByVaultPath(vaultPath)
 
     for (const row of vaultNodeRows) {
       nodes.set(row.note_path, row.id)

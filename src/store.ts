@@ -150,6 +150,18 @@ function maxEditDistance(wordLength: number): number {
 // boundaries when a chunk exceeds this cap.
 const MAX_CHUNK_BYTES = 4096;
 
+// Shared FTS5 column definitions to prevent schema drift between
+// initial CREATE and migration re-CREATE paths.
+const FTS5_COLUMNS = `
+  title,
+  content,
+  source_id UNINDEXED,
+  content_type UNINDEXED,
+  source_category UNINDEXED,
+  session_id UNINDEXED,
+  event_id UNINDEXED,
+  timestamp UNINDEXED`;
+
 // ─────────────────────────────────────────────────────────
 // ContentStore
 // ─────────────────────────────────────────────────────────
@@ -343,7 +355,6 @@ export class ContentStore {
   // re-compiling SQL on each invocation.
 
   // Write path
-  #stmtInsertSourceEmpty!: PreparedStatement;
   #stmtInsertSource!: PreparedStatement;
   #stmtInsertChunk!: PreparedStatement;
   #stmtInsertChunkTrigram!: PreparedStatement;
@@ -451,29 +462,9 @@ export class ContentStore {
         content_hash TEXT
       );
 
-      CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
-        title,
-        content,
-        source_id UNINDEXED,
-        content_type UNINDEXED,
-        source_category UNINDEXED,
-        session_id UNINDEXED,
-        event_id UNINDEXED,
-        timestamp UNINDEXED,
-        tokenize='porter unicode61'
-      );
+      CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(${FTS5_COLUMNS}, tokenize='porter unicode61');
 
-      CREATE VIRTUAL TABLE IF NOT EXISTS chunks_trigram USING fts5(
-        title,
-        content,
-        source_id UNINDEXED,
-        content_type UNINDEXED,
-        source_category UNINDEXED,
-        session_id UNINDEXED,
-        event_id UNINDEXED,
-        timestamp UNINDEXED,
-        tokenize='trigram'
-      );
+      CREATE VIRTUAL TABLE IF NOT EXISTS chunks_trigram USING fts5(${FTS5_COLUMNS}, tokenize='trigram');
 
       CREATE TABLE IF NOT EXISTS vocabulary (
         word TEXT PRIMARY KEY
@@ -499,28 +490,8 @@ export class ContentStore {
         this.#db.exec("DROP TABLE IF EXISTS chunks");
         this.#db.exec("DROP TABLE IF EXISTS chunks_trigram");
         this.#db.exec(`
-          CREATE VIRTUAL TABLE chunks USING fts5(
-            title,
-            content,
-            source_id UNINDEXED,
-            content_type UNINDEXED,
-            source_category UNINDEXED,
-            session_id UNINDEXED,
-            event_id UNINDEXED,
-            timestamp UNINDEXED,
-            tokenize='porter unicode61'
-          );
-          CREATE VIRTUAL TABLE chunks_trigram USING fts5(
-            title,
-            content,
-            source_id UNINDEXED,
-            content_type UNINDEXED,
-            source_category UNINDEXED,
-            session_id UNINDEXED,
-            event_id UNINDEXED,
-            timestamp UNINDEXED,
-            tokenize='trigram'
-          );
+          CREATE VIRTUAL TABLE chunks USING fts5(${FTS5_COLUMNS}, tokenize='porter unicode61');
+          CREATE VIRTUAL TABLE chunks_trigram USING fts5(${FTS5_COLUMNS}, tokenize='trigram');
         `);
       }
     } catch { /* pragma_table_xinfo may fail if table doesn't exist yet — safe to ignore */ }
@@ -532,9 +503,6 @@ export class ContentStore {
 
   #prepareStatements(): void {
     // Write path
-    this.#stmtInsertSourceEmpty = this.#db.prepare(
-      "INSERT INTO sources (label, chunk_count, code_chunk_count, file_path, content_hash) VALUES (?, 0, 0, ?, ?)",
-    );
     this.#stmtInsertSource = this.#db.prepare(
       "INSERT INTO sources (label, chunk_count, code_chunk_count, file_path, content_hash) VALUES (?, ?, ?, ?, ?)",
     );
@@ -779,7 +747,7 @@ export class ContentStore {
       this.#stmtDeleteSourcesByLabel.run(label);
 
       if (chunks.length === 0) {
-        const info = this.#stmtInsertSourceEmpty.run(label, filePath ?? null, contentHash ?? null);
+        const info = this.#stmtInsertSource.run(label, 0, 0, filePath ?? null, contentHash ?? null);
         return Number(info.lastInsertRowid);
       }
 
@@ -869,6 +837,30 @@ export class ContentStore {
     return { stmt: stmts.base, params: [sanitized, limit] };
   }
 
+  #searchCore(
+    query: string,
+    limit: number,
+    source: string | undefined,
+    mode: "AND" | "OR",
+    contentType: "code" | "prose" | undefined,
+    sourceMatchMode: SourceMatchMode,
+    sanitize: (q: string, m: "AND" | "OR") => string,
+    stmts: {
+      base: PreparedStatement;
+      filtered: PreparedStatement;
+      exact: PreparedStatement;
+      contentType: PreparedStatement;
+      filteredContentType: PreparedStatement;
+      exactContentType: PreparedStatement;
+    },
+    allowEmpty: boolean,
+  ): SearchResult[] {
+    const sanitized = sanitize(query, mode);
+    if (!allowEmpty && !sanitized) return [];
+    const { stmt, params } = this.#selectSearchStmt(stmts, sanitized, limit, source, contentType, sourceMatchMode);
+    return withRetry(() => this.#mapSearchRows(stmt.all(...params) as SearchRow[]));
+  }
+
   search(
     query: string,
     limit: number = 3,
@@ -877,19 +869,14 @@ export class ContentStore {
     contentType?: "code" | "prose",
     sourceMatchMode: SourceMatchMode = "like",
   ): SearchResult[] {
-    const sanitized = sanitizeQuery(query, mode);
-    const { stmt, params } = this.#selectSearchStmt(
-      {
-        base: this.#stmtSearchPorter,
-        filtered: this.#stmtSearchPorterFiltered,
-        exact: this.#stmtSearchPorterExact,
-        contentType: this.#stmtSearchPorterContentType,
-        filteredContentType: this.#stmtSearchPorterFilteredContentType,
-        exactContentType: this.#stmtSearchPorterExactContentType,
-      },
-      sanitized, limit, source, contentType, sourceMatchMode,
-    );
-    return withRetry(() => this.#mapSearchRows(stmt.all(...params) as SearchRow[]));
+    return this.#searchCore(query, limit, source, mode, contentType, sourceMatchMode, sanitizeQuery, {
+      base: this.#stmtSearchPorter,
+      filtered: this.#stmtSearchPorterFiltered,
+      exact: this.#stmtSearchPorterExact,
+      contentType: this.#stmtSearchPorterContentType,
+      filteredContentType: this.#stmtSearchPorterFilteredContentType,
+      exactContentType: this.#stmtSearchPorterExactContentType,
+    }, true);
   }
 
   // ── Trigram Search (Layer 2) ──
@@ -902,20 +889,14 @@ export class ContentStore {
     contentType?: "code" | "prose",
     sourceMatchMode: SourceMatchMode = "like",
   ): SearchResult[] {
-    const sanitized = sanitizeTrigramQuery(query, mode);
-    if (!sanitized) return [];
-    const { stmt, params } = this.#selectSearchStmt(
-      {
-        base: this.#stmtSearchTrigram,
-        filtered: this.#stmtSearchTrigramFiltered,
-        exact: this.#stmtSearchTrigramExact,
-        contentType: this.#stmtSearchTrigramContentType,
-        filteredContentType: this.#stmtSearchTrigramFilteredContentType,
-        exactContentType: this.#stmtSearchTrigramExactContentType,
-      },
-      sanitized, limit, source, contentType, sourceMatchMode,
-    );
-    return withRetry(() => this.#mapSearchRows(stmt.all(...params) as SearchRow[]));
+    return this.#searchCore(query, limit, source, mode, contentType, sourceMatchMode, sanitizeTrigramQuery, {
+      base: this.#stmtSearchTrigram,
+      filtered: this.#stmtSearchTrigramFiltered,
+      exact: this.#stmtSearchTrigramExact,
+      contentType: this.#stmtSearchTrigramContentType,
+      filteredContentType: this.#stmtSearchTrigramFilteredContentType,
+      exactContentType: this.#stmtSearchTrigramExactContentType,
+    }, false);
   }
 
   // ── Fuzzy Correction (Layer 3) ──
@@ -969,6 +950,23 @@ export class ContentStore {
 
   // ── Reciprocal Rank Fusion (Cormack et al. 2009) ──
 
+  #addToRRF(
+    results: SearchResult[],
+    scoreMap: Map<string, { result: SearchResult; score: number }>,
+    key: (r: SearchResult) => string,
+    K: number,
+  ): void {
+    for (const [i, r] of results.entries()) {
+      const k = key(r);
+      const existing = scoreMap.get(k);
+      if (existing) {
+        existing.score += 1 / (K + i + 1);
+      } else {
+        scoreMap.set(k, { result: r, score: 1 / (K + i + 1) });
+      }
+    }
+  }
+
   #rrfSearch(
     query: string,
     limit: number,
@@ -985,25 +983,8 @@ export class ContentStore {
     const scoreMap = new Map<string, { result: SearchResult; score: number }>();
     const key = (r: SearchResult) => `${r.source}::${r.title}`;
 
-    for (const [i, r] of porterResults.entries()) {
-      const k = key(r);
-      const existing = scoreMap.get(k);
-      if (existing) {
-        existing.score += 1 / (K + i + 1);
-      } else {
-        scoreMap.set(k, { result: r, score: 1 / (K + i + 1) });
-      }
-    }
-
-    for (const [i, r] of trigramResults.entries()) {
-      const k = key(r);
-      const existing = scoreMap.get(k);
-      if (existing) {
-        existing.score += 1 / (K + i + 1);
-      } else {
-        scoreMap.set(k, { result: r, score: 1 / (K + i + 1) });
-      }
-    }
+    this.#addToRRF(porterResults, scoreMap, key, K);
+    this.#addToRRF(trigramResults, scoreMap, key, K);
 
     return Array.from(scoreMap.values())
       .sort((a, b) => b.score - a.score)

@@ -9,14 +9,6 @@ export default defineConfig({
     // Native addons (better-sqlite3) can segfault in worker_threads during
     // process cleanup. Use single fork to avoid teardown race entirely.
     pool: "forks",
-    poolOptions: {
-      forks: {
-        // Single fork avoids the native-addon teardown race that causes
-        // "Worker exited unexpectedly" on CI. Performance cost is acceptable
-        // for current test count (~2450 tests in ~60s vs ~43s with 3 workers).
-        singleFork: isCI,
-      },
-    } as any,
     // Non-CI: allow limited parallelism for speed (3 workers = ~2.8x speedup).
     maxWorkers: isCI ? 1 : 3,
     // Hook subprocess tests (spawnSync + better-sqlite3 native addon) can

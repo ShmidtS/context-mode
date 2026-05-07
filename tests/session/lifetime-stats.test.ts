@@ -17,6 +17,7 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { afterAll, describe, expect, test } from "vitest";
 import { SessionDB } from "../../src/session/db.js";
 import { getLifetimeStats } from "../../src/session/analytics.js";
+import type { SessionEvent } from "../../src/types.js";
 
 const cleanups: Array<() => void> = [];
 
@@ -37,7 +38,7 @@ function tmpDbPath(dir: string, name: string): string {
   return join(dir, `${name}.db`);
 }
 
-function makeEvent(data: string) {
+function makeEvent(data: string): Omit<SessionEvent, "data_hash"> & { data_hash?: string } {
   return {
     type: "file",
     category: "file",
@@ -108,7 +109,7 @@ describe("getLifetimeStats — cross-session totals + auto-memory", () => {
   test("aggregates categoryCounts across multiple SessionDBs", () => {
     const sessionsDir = tmpDir("sessions-cats");
 
-    function eventOfCategory(cat: string, data: string) {
+    function eventOfCategory(cat: SessionEvent["category"], data: string) {
       return { type: cat, category: cat, data, priority: 2, data_hash: "" };
     }
 

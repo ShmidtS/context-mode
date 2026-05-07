@@ -66,8 +66,8 @@ export class VaultGraphSearch {
       if (edge.target_id !== null) nodeIds.add(edge.target_id);
     }
     // Also add nodes with no edges
-    const allNodes = this.#store.db.prepare("SELECT id FROM vault_nodes").all() as Array<{ id: number }>;
-    for (const n of allNodes) nodeIds.add(n.id);
+    const allNodeIds = this.#store.getAllNodeIds();
+    for (const id of allNodeIds) nodeIds.add(id);
 
     const N = nodeIds.size;
     if (N === 0) {
@@ -460,11 +460,8 @@ export class VaultGraphSearch {
     if (byTitle) return { id: byTitle.id, in_degree: byTitle.in_degree };
 
     // Try matching by title substring in note_path
-    const db = this.#store.db;
     try {
-      const row = db.prepare(
-        "SELECT id, in_degree FROM vault_nodes WHERE note_path LIKE ? LIMIT 1"
-      ).get(`%${result.title}%`) as { id: number; in_degree: number } | undefined;
+      const row = this.#store.findNodeByTitleLike(`%${result.title}%`);
       if (row) return { id: row.id, in_degree: row.in_degree };
     } catch (e) {
       if (DEBUG) process.stderr.write(`[ctx] vault node path match failed: ${e}\n`);

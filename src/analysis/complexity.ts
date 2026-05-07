@@ -57,8 +57,8 @@ export class ComplexityAnalyzer {
 
   // ── Schema ──
 
-  ensureTables(db: import('better-sqlite3').Database): void {
-    db.exec(`
+  ensureTables(store: VaultGraphStore): void {
+    store.exec(`
       CREATE TABLE IF NOT EXISTS code_complexity (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         symbol_id INTEGER,
@@ -117,18 +117,15 @@ export class ComplexityAnalyzer {
     vaultPath: string,
     graphStore: VaultGraphStore,
   ): VaultComplexityResult[] {
-    const db = graphStore.db
-    this.ensureTables(db)
+    this.ensureTables(graphStore)
 
     // Get all vault nodes for this path
-    const nodes = db.prepare(
-      'SELECT id, note_path FROM vault_nodes WHERE vault_path = ? AND source_type = ?'
-    ).all(vaultPath, 'vault') as Array<{ id: number; note_path: string }>
+    const nodes = graphStore.getNodeIdAndPathByVaultPathAndSourceType(vaultPath, 'vault')
 
     if (nodes.length === 0) return []
 
     const results: VaultComplexityResult[] = []
-    const insertStmt = db.prepare(
+    const insertStmt = graphStore.prepare(
       'INSERT INTO code_complexity (symbol_id, node_id, complexity, decision_points, lines_of_code) VALUES (?, ?, ?, ?, ?)'
     )
 
@@ -136,7 +133,7 @@ export class ComplexityAnalyzer {
     const nodeIds = nodes.map((n) => n.id)
     if (nodeIds.length > 0) {
       const placeholders = nodeIds.map(() => '?').join(',')
-      db.prepare(`DELETE FROM code_complexity WHERE node_id IN (${placeholders})`).run(...nodeIds)
+      graphStore.prepare(`DELETE FROM code_complexity WHERE node_id IN (${placeholders})`).run(...nodeIds)
     }
 
     for (const node of nodes) {

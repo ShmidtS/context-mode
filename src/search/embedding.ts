@@ -78,10 +78,8 @@ export class OllamaProvider implements EmbeddingProvider {
 export class ONNXProvider implements EmbeddingProvider {
   readonly name: string
   readonly dimensions: number
-  readonly #modelPath: string
 
-  constructor(modelPath: string) {
-    this.#modelPath = modelPath
+  constructor(_modelPath: string) {
     this.name = 'onnx-local'
     this.dimensions = 0
   }

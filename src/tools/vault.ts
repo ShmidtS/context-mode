@@ -87,9 +87,7 @@ export function registerVaultTools(
           const result = indexVault(resolvedVaultPath, adapter);
 
           // Recalculate degrees for all indexed nodes
-          const nodeIds = store.db
-            .prepare("SELECT id FROM vault_nodes WHERE vault_path = ?")
-            .all(resolvedVaultPath) as { id: number }[];
+          const nodeIds = store.getNodeIdsByVaultPath(resolvedVaultPath);
           for (const { id } of nodeIds) {
             store.recalcDegrees(id);
           }
