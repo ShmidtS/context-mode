@@ -184,12 +184,12 @@ export function cleanupStaleDBs(): number {
       } catch {
         const base = join(dir, file);
         for (const suffix of ["", "-wal", "-shm"]) {
-          try { unlinkSync(base + suffix); } catch { /* ignore */ }
+          try { unlinkSync(base + suffix); } catch (e) { console.warn("cleanupStaleDBs unlink failed", e) }
         }
         cleaned++;
       }
     }
-  } catch { /* ignore readdir errors */ }
+  } catch (e) { console.warn("cleanupStaleDBs readdir failed", e) }
   return cleaned;
 }
 
@@ -224,19 +224,19 @@ export function cleanupStaleContentDBs(contentDir: string, maxAgeDays: number): 
               if (walStat.size > 0 && (Date.now() - walStat.mtimeMs) > 3600_000) {
                 shouldClean = true;
               }
-            } catch { /* ignore WAL check errors */ }
+            } catch (e) { console.warn("cleanupStaleContentDBs walStat failed", e) }
           }
         }
 
         if (shouldClean) {
           for (const suffix of ["", "-wal", "-shm"]) {
-            try { unlinkSync(filePath + suffix); } catch { /* ignore */ }
+            try { unlinkSync(filePath + suffix); } catch (e) { console.warn("cleanupStaleContentDBs unlink failed", e) }
           }
           cleaned++;
         }
-      } catch { /* ignore per-file errors */ }
+      } catch (e) { console.warn("cleanupStaleContentDBs per-file failed", e) }
     }
-  } catch { /* ignore readdir errors */ }
+  } catch (e) { console.warn("cleanupStaleContentDBs readdir failed", e) }
   return cleaned;
 }
 
@@ -442,9 +442,9 @@ export class ContentStore {
   cleanup(): void {
     try {
       this.#db.close();
-    } catch { /* ignore */ }
+    } catch (e) { console.warn("ContentStore.cleanup close failed", e) }
     for (const suffix of ["", "-wal", "-shm"]) {
-      try { unlinkSync(this.#dbPath + suffix); } catch { /* ignore */ }
+      try { unlinkSync(this.#dbPath + suffix); } catch (e) { console.warn("ContentStore.cleanup unlink failed", e) }
     }
   }
 
@@ -494,11 +494,11 @@ export class ContentStore {
           CREATE VIRTUAL TABLE chunks_trigram USING fts5(${FTS5_COLUMNS}, tokenize='trigram');
         `);
       }
-    } catch { /* pragma_table_xinfo may fail if table doesn't exist yet — safe to ignore */ }
+    } catch (e) { console.warn("#initSchema table_xinfo failed", e) }
 
     // Stale detection columns — safe for existing DBs (ALTER is O(1) in SQLite)
-    try { this.#db.exec("ALTER TABLE sources ADD COLUMN file_path TEXT"); } catch { /* already exists */ }
-    try { this.#db.exec("ALTER TABLE sources ADD COLUMN content_hash TEXT"); } catch { /* already exists */ }
+    try { this.#db.exec("ALTER TABLE sources ADD COLUMN file_path TEXT"); } catch (e) { console.warn("#initSchema add file_path already exists", e) }
+    try { this.#db.exec("ALTER TABLE sources ADD COLUMN content_hash TEXT"); } catch (e) { console.warn("#initSchema add content_hash already exists", e) }
   }
 
   #prepareStatements(): void {
@@ -1121,8 +1121,8 @@ export class ContentStore {
         // File genuinely changed — re-index
         this.index({ path: src.file_path, source: src.label });
         this.lastRefreshCount++;
-      } catch {
-        // Graceful degradation — never break search for stale detection
+      } catch (err) {
+        console.warn("refreshStaleSource re-index failed", err);
       }
     }
   }
@@ -1257,7 +1257,7 @@ export class ContentStore {
     try {
       this.#db.exec("INSERT INTO chunks(chunks) VALUES('optimize')");
       this.#db.exec("INSERT INTO chunks_trigram(chunks_trigram) VALUES('optimize')");
-    } catch { /* best effort — don't block indexing */ }
+    } catch (e) { console.warn("#optimizeFTS failed", e) }
   }
 
   close(): void {

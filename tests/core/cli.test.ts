@@ -445,7 +445,7 @@ describe("bun:sqlite adapter (#45)", () => {
     const fake = await createBunLikeFake();
     const db = new BunSQLiteAdapter(fake);
     fake.exec("CREATE TABLE test_tbl (id INTEGER PRIMARY KEY, name TEXT)");
-    const rows = db.pragma("table_xinfo(test_tbl)");
+    const rows = db.pragma("table_xinfo(test_tbl)") as Array<{ name: string }>;
     expect(Array.isArray(rows)).toBe(true);
     expect(rows.length).toBe(2);
     expect(rows[0].name).toBe("id");
@@ -513,11 +513,11 @@ describe("bun:sqlite adapter (#45)", () => {
     const fake = await createBunLikeFake();
     const db = new BunSQLiteAdapter(fake);
     db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)");
-    const insertMany = db.transaction((items: string[]) => {
+    const insertMany = db.transaction(((items: string[]) => {
       for (const item of items) {
         db.prepare("INSERT INTO t (val) VALUES (?)").run(item);
       }
-    });
+    }) as (...args: unknown[]) => unknown);
     insertMany(["a", "b", "c"]);
     const rows = db.prepare("SELECT * FROM t").all();
     expect(rows).toHaveLength(3);
@@ -606,7 +606,7 @@ describe("node:sqlite adapter (#228)", () => {
     const fake = await createNodeSQLiteFake();
     const db = new NodeSQLiteAdapter(fake);
     fake.exec("CREATE TABLE test_tbl (id INTEGER PRIMARY KEY, name TEXT)");
-    const rows = db.pragma("table_xinfo(test_tbl)");
+    const rows = db.pragma("table_xinfo(test_tbl)") as Array<{ name: string }>;
     expect(Array.isArray(rows)).toBe(true);
     expect(rows.length).toBe(2);
     expect(rows[0].name).toBe("id");
@@ -657,11 +657,11 @@ describe("node:sqlite adapter (#228)", () => {
     const fake = await createNodeSQLiteFake();
     const db = new NodeSQLiteAdapter(fake);
     db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)");
-    const insertMany = db.transaction((items: string[]) => {
+    const insertMany = db.transaction(((items: string[]) => {
       for (const item of items) {
         db.prepare("INSERT INTO t (val) VALUES (?)").run(item);
       }
-    });
+    }) as (...args: unknown[]) => unknown);
     insertMany(["a", "b", "c"]);
     const rows = db.prepare("SELECT * FROM t").all();
     expect(rows).toHaveLength(3);

@@ -17,8 +17,7 @@
 import {
   readFileSync,
 } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { homedir } from "node:os";
 
 import { BaseAdapter } from "../base.js";
@@ -358,21 +357,7 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
   }
 
   getRoutingInstructions(): string {
-    const instructionsPath = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "..",
-      "configs",
-      "codex",
-      "AGENTS.md",
-    );
-    try {
-      return readFileSync(instructionsPath, "utf-8");
-    } catch {
-      // Fallback inline instructions
-      return "# context-mode\n\nUse context-mode MCP tools (execute, execute_file, batch_execute, fetch_and_index, search) instead of bash/cat/curl for data-heavy operations.";
-    }
+    return this.readRoutingInstructionsFile("codex", "AGENTS.md", "execute, execute_file, batch_execute, fetch_and_index, search");
   }
 
   // ── Internal helpers ───────────────────────────────────

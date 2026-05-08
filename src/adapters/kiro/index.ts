@@ -22,11 +22,8 @@ import {
   readFileSync,
   writeFileSync,
   mkdirSync,
-  accessSync,
-  constants,
 } from "node:fs";
 import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
 import { BaseAdapter } from "../base.js";
@@ -217,15 +214,6 @@ export class KiroAdapter extends BaseAdapter implements HookAdapter {
     };
   }
 
-  readSettings(): Record<string, unknown> | null {
-    try {
-      const raw = readFileSync(this.getSettingsPath(), "utf-8");
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-
   writeSettings(settings: Record<string, unknown>): void {
     const settingsPath = this.getSettingsPath();
     mkdirSync(dirname(settingsPath), { recursive: true });
@@ -285,48 +273,11 @@ export class KiroAdapter extends BaseAdapter implements HookAdapter {
   }
 
   checkPluginRegistration(): DiagnosticResult {
-    try {
-      const raw = readFileSync(this.getSettingsPath(), "utf-8");
-      const config = JSON.parse(raw);
-      const mcpServers = config?.mcpServers ?? {};
-
-      if ("context-mode" in mcpServers) {
-        return {
-          check: "MCP registration",
-          status: "pass",
-          message: "context-mode found in mcpServers config",
-        };
-      }
-
-      return {
-        check: "MCP registration",
-        status: "fail",
-        message: "context-mode not found in mcpServers",
-        fix: "Add context-mode to mcpServers in ~/.kiro/settings/mcp.json",
-      };
-    } catch {
-      return {
-        check: "MCP registration",
-        status: "warn",
-        message: "Could not read ~/.kiro/settings/mcp.json",
-      };
-    }
+    return this.checkMcpServersRegistration("~/.kiro/settings/mcp.json");
   }
 
   getInstalledVersion(): string {
-    try {
-      const pkgPath = resolve(
-        homedir(),
-        ".kiro",
-        "extensions",
-        "context-mode",
-        "package.json",
-      );
-      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-      return pkg.version ?? "unknown";
-    } catch {
-      return "not installed";
-    }
+    return this.readVersionFromExtensionCache([".kiro"]);
   }
 
   // ── Upgrade ────────────────────────────────────────────
@@ -342,8 +293,8 @@ export class KiroAdapter extends BaseAdapter implements HookAdapter {
       let config: Record<string, unknown> = {};
       try {
         config = JSON.parse(readFileSync(defaultAgent, "utf-8"));
-      } catch {
-        // No existing config — create new
+      } catch (err) {
+        console.warn("Failed to read/parse existing config", err);
       }
 
       const hooks = (config.hooks ?? {}) as Record<string, unknown[]>;
@@ -386,19 +337,6 @@ export class KiroAdapter extends BaseAdapter implements HookAdapter {
   }
 
   getRoutingInstructions(): string {
-    const instructionsPath = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "..",
-      "configs",
-      "kiro",
-      "KIRO.md",
-    );
-    try {
-      return readFileSync(instructionsPath, "utf-8");
-    } catch {
-      return "# context-mode\n\nUse context-mode MCP tools (execute, execute_file, batch_execute, fetch_and_index, search) instead of run_command/view_file for data-heavy operations.";
-    }
+    return this.readRoutingInstructionsFile("kiro", "KIRO.md", "execute, execute_file, batch_execute, fetch_and_index, search");
   }
 }

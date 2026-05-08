@@ -27,6 +27,7 @@ import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 
 import { BaseAdapter } from "../base.js";
+import { normalizeSessionSource } from "../shared.js";
 
 import type {
   HookAdapter,
@@ -127,26 +128,9 @@ export class OpenClawAdapter extends BaseAdapter implements HookAdapter {
 
   parseSessionStartInput(raw: unknown): SessionStartEvent {
     const input = raw as OpenClawHookInput;
-    const rawSource = input.source ?? "startup";
-
-    let source: SessionStartEvent["source"];
-    switch (rawSource) {
-      case "compact":
-        source = "compact";
-        break;
-      case "resume":
-        source = "resume";
-        break;
-      case "clear":
-        source = "clear";
-        break;
-      default:
-        source = "startup";
-    }
-
     return {
       sessionId: this.extractSessionId(input),
-      source,
+      source: normalizeSessionSource(input.source),
       projectDir: this.getProjectDir(input),
       raw,
     };
@@ -411,8 +395,8 @@ export class OpenClawAdapter extends BaseAdapter implements HookAdapter {
       );
       const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
       if (typeof pkg.version === "string") return pkg.version;
-    } catch {
-      /* not found */
+    } catch (err) {
+      console.warn("detectInstalledVersion failed", err);
     }
 
     // Also check node_modules
@@ -424,8 +408,8 @@ export class OpenClawAdapter extends BaseAdapter implements HookAdapter {
       );
       const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
       if (typeof pkg.version === "string") return pkg.version;
-    } catch {
-      /* not found */
+    } catch (err) {
+      console.warn("detectInstalledVersion failed", err);
     }
 
     return "not installed";

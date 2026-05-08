@@ -4,7 +4,7 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from 'zod'
-import { trackResponse, getStore, acquireVaultStores, toolErrorResponse, getProjectDir, _detectedAdapter } from './shared.js'
+import { trackResponse, getStore, acquireVaultStores, toolErrorResponse, getProjectDir, _detectedAdapter, classifyIp } from './shared.js'
 import { searchAllSources } from '../search/unified.js'
 import { ContextPacker } from '../search/context-packer.js'
 import { VectorStore } from '../search/vector-store.js'
@@ -13,6 +13,46 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const DEBUG = process.env.DEBUG?.includes('context-mode')
+
+/**
+ * Validate that a user-supplied Ollama host URL does not resolve to a
+ * private / link-local / multicast / reserved IP (SSRF guard).
+ * Mirrors the ssrfGuard logic from admin.ts but throws on block.
+ */
+async function ssrfCheckHost(hostUrl: string): Promise<void> {
+  let parsed: URL
+  try {
+    parsed = new URL(hostUrl)
+  } catch {
+    throw new Error(`Invalid Ollama host URL: ${hostUrl}`)
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`Ollama host URL scheme "${parsed.protocol}" not allowed (only http: and https:)`)
+  }
+  const allowPrivate = process.env.CTX_FETCH_ALLOW_PRIVATE === '1'
+  try {
+    const { lookup } = await import('node:dns/promises')
+    const records = await lookup(parsed.hostname, { all: true, verbatim: true })
+    for (const rec of records) {
+      const verdict = classifyIp(rec.address)
+      if (verdict === 'block') {
+        throw new Error(
+          `Ollama host "${parsed.hostname}" resolves to ${rec.address} — blocked (link-local / IMDS / multicast / reserved)`,
+        )
+      }
+      if (verdict === 'private' && !allowPrivate) {
+        throw new Error(
+          `Ollama host "${parsed.hostname}" resolves to private IP ${rec.address} — blocked by default. Set CTX_FETCH_ALLOW_PRIVATE=1 to allow.`,
+        )
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('blocked')) throw err
+    throw new Error(
+      `DNS lookup failed for Ollama host "${parsed.hostname}": ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+}
 
 // ─────────────────────────────────────────────────────────
 // Shared vector store + embedding provider (lazy singletons)
@@ -33,10 +73,13 @@ function getSharedVectorStore(): VectorStore {
 async function getSharedEmbeddingProvider(
   model?: string,
   host?: string,
-  apiKey?: string,
 ): Promise<EmbeddingProvider | null> {
-  // If explicit model, host, or apiKey passed, always create a fresh provider
-  if (model || host || apiKey) {
+  // Read API key from environment only — never accept secrets as tool arguments (H-1 fix)
+  const apiKey = process.env.OLLAMA_API_KEY || process.env.EMBEDDING_API_KEY || undefined
+
+  // If explicit model or host passed, always create a fresh provider
+  if (model || host) {
+    if (host) await ssrfCheckHost(host)
     const ollama = new OllamaProvider(model, host, undefined, apiKey)
     const testEmbed = await ollama.embed('test')
     return testEmbed ? ollama : null
@@ -52,7 +95,7 @@ async function getSharedEmbeddingProvider(
       _embeddingProvider = ollama
       return _embeddingProvider
     }
-  } catch { /* Ollama not available */ }
+  } catch (e) { console.warn("getEmbeddingProvider Ollama test failed", e) }
 
   _embeddingProvider = null
   return null
@@ -60,7 +103,7 @@ async function getSharedEmbeddingProvider(
 
 export function resetContextStreamState(): void {
   if (_vectorStore) {
-    try { _vectorStore.cleanup() } catch { /* best effort */ }
+    try { _vectorStore.cleanup() } catch (e) { console.warn("resetContextStreamState cleanup failed", e) }
     _vectorStore = null
   }
   _embeddingProvider = undefined as unknown as EmbeddingProvider | null
@@ -91,24 +134,22 @@ export function registerContextStreamTools(
           .describe('Minimum similarity threshold 0-1 (default: 0.5)'),
         model: z.string().optional().describe('Embedding model name (e.g. nomic-embed-text, mxbai-embed-large)'),
         host: z.string().optional().describe('Ollama host URL (default: http://localhost:11434)'),
-        apiKey: z.string().optional().describe('Optional API key / Bearer token for embedding endpoint authentication'),
       }),
     },
     async (params) => {
       try {
-        const { query, limit, contentType, minSimilarity, model, host, apiKey } = params as {
+        const { query, limit, contentType, minSimilarity, model, host } = params as {
           query: string
           limit?: number
           contentType?: 'code' | 'prose'
           minSimilarity?: number
           model?: string
           host?: string
-          apiKey?: string
         }
 
         const effectiveLimit = limit ?? 5
         const effectiveMinSimilarity = minSimilarity ?? 0.5
-        const provider = await getSharedEmbeddingProvider(model, host, apiKey)
+        const provider = await getSharedEmbeddingProvider(model, host)
 
         if (!provider) {
           return trackResponse('ctx_semantic_search', {
@@ -194,24 +235,21 @@ export function registerContextStreamTools(
           .describe('Embedding model name (default: nomic-embed-text)'),
         host: z.string().optional()
           .describe('Ollama host URL (default: http://localhost:11434)'),
-        apiKey: z.string().optional()
-          .describe('Optional API key / Bearer token for embedding endpoint authentication'),
         force: z.boolean().optional().default(false)
           .describe('Force reindexing even if embeddings already exist'),
       }),
     },
     async (params) => {
       try {
-        const { vaultPath, model, host, apiKey, force } = params as {
+        const { vaultPath, model, host, force } = params as {
           vaultPath: string
           model?: string
           host?: string
-          apiKey?: string
           force?: boolean
         }
 
         const effectiveModel = model || 'nomic-embed-text'
-        const provider = await getSharedEmbeddingProvider(effectiveModel, host, apiKey)
+        const provider = await getSharedEmbeddingProvider(effectiveModel, host)
 
         if (!provider) {
           return trackResponse('ctx_index_embeddings', {

@@ -455,8 +455,8 @@ export class CursorAdapter extends BaseAdapter implements HookAdapter {
         accessSync(scriptPath, constants.R_OK);
         chmodSync(scriptPath, 0o755);
         set.push(scriptPath);
-      } catch {
-        /* skip missing scripts */
+      } catch (err) {
+        console.warn("chmodSync failed", err);
       }
     }
     return set;

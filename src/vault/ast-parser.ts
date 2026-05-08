@@ -24,8 +24,8 @@ try {
   const tsModule = require('tree-sitter-typescript')
   TypeScriptLang = tsModule.typescript
   tsxLang = tsModule.tsx
-} catch {
-  // tree-sitter not installed — all functions return empty results
+} catch (err) {
+  console.warn("tsModule failed", err);
 }
 
 // ─────────────────────────────────────────────────────────

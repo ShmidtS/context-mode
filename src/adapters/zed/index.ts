@@ -12,11 +12,8 @@
 
 import {
   readFileSync,
-  writeFileSync,
-  mkdirSync,
 } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { homedir } from "node:os";
 
 import { McpOnlyBaseAdapter } from "../mcp-only-base.js";
@@ -44,21 +41,6 @@ export class ZedAdapter extends McpOnlyBaseAdapter {
 
   getInstructionFiles(): string[] {
     return ["AGENTS.md"];
-  }
-
-  readSettings(): Record<string, unknown> | null {
-    try {
-      const raw = readFileSync(this.getSettingsPath(), "utf-8");
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-
-  writeSettings(settings: Record<string, unknown>): void {
-    const settingsPath = this.getSettingsPath();
-    mkdirSync(dirname(settingsPath), { recursive: true });
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
   }
 
   // ── Diagnostics (doctor) ─────────────────────────────────
@@ -115,26 +97,12 @@ export class ZedAdapter extends McpOnlyBaseAdapter {
     }
   }
 
+  getRoutingInstructions(): string {
+    return this.readRoutingInstructionsFile("zed", "AGENTS.md", "execute, execute_file, batch_execute, fetch_and_index, search");
+  }
+
   getInstalledVersion(): string {
     // Zed has no marketplace or plugin system for context-mode
     return "not installed";
-  }
-
-  getRoutingInstructions(): string {
-    const instructionsPath = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "..",
-      "configs",
-      "zed",
-      "AGENTS.md",
-    );
-    try {
-      return readFileSync(instructionsPath, "utf-8");
-    } catch {
-      // Fallback inline instructions
-      return "# context-mode\n\nUse context-mode MCP tools (execute, execute_file, batch_execute, fetch_and_index, search) instead of bash/cat/curl for data-heavy operations.";
-    }
   }
 }

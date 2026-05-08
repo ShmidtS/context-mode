@@ -114,7 +114,7 @@ export class DeadCodeAnalyzer {
           entryPaths.add(row.note_path)
         }
       }
-    } catch { /* table may not exist yet */ }
+    } catch (e) { console.warn("getDeadCode table read failed", e) }
 
     // Auto-detect entry points if none provided
     if (entryNodeIds.size === 0) {

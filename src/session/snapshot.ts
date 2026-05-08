@@ -184,7 +184,7 @@ export function renderTaskState(taskEvents: StoredEvent[]): string {
       } else if (typeof parsed.taskId === "string" && typeof parsed.status === "string") {
         updates[parsed.taskId] = parsed.status;
       }
-    } catch { /* not JSON */ }
+    } catch (e) { console.warn("parseCreateEvents JSON parse failed", e) }
   }
 
   if (creates.length === 0) return "";
@@ -224,7 +224,7 @@ function buildTaskSection(taskEvents: StoredEvent[], searchTool: string): string
       if (typeof parsed.subject === "string") {
         queryTerms.push(parsed.subject);
       }
-    } catch { /* not JSON */ }
+    } catch (e) { console.warn("extractQueryTerms JSON parse failed", e) }
   }
 
   const queries = buildQueries(queryTerms);

@@ -4,11 +4,31 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from 'zod'
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, realpathSync, existsSync } from 'node:fs'
+import { dirname, basename, join, resolve, relative, sep, isAbsolute } from 'node:path'
 import { trackResponse, getSharedVaultStore } from './shared.js'
 import { DeadCodeAnalyzer } from '../analysis/dead-code.js'
 import { ComplexityAnalyzer } from '../analysis/complexity.js'
 import { GraphVisualizer } from '../analysis/visualize.js'
+
+const safeRealpathForCreate = (p: string): string => {
+  const abs = resolve(p)
+  let cur = abs
+  const missing: string[] = []
+  while (!existsSync(cur)) {
+    missing.unshift(basename(cur))
+    const parent = dirname(cur)
+    if (parent === cur) throw new Error(`No existing parent for path: ${p}`)
+    cur = parent
+  }
+  return join(realpathSync(cur), ...missing)
+}
+
+
+const isInside = (child: string, parent: string): boolean => {
+  const rel = relative(parent, child)
+  return rel === '' || (!!rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
 
 export function registerCodeGraphTools(
   server: import('@modelcontextprotocol/sdk/server/mcp.js').McpServer,
@@ -180,7 +200,16 @@ export function registerCodeGraphTools(
 
         // Write to file if outputPath specified
         if (outputPath) {
-          writeFileSync(outputPath, graph, 'utf8')
+          const resolvedOutput = safeRealpathForCreate(outputPath)
+          const resolvedVault = realpathSync(resolve(vaultPath))
+          const norm = (p: string) =>
+            process.platform === 'win32' ? p.toLowerCase() : p
+          if (!isInside(norm(resolvedOutput), norm(resolvedVault))) {
+            throw new Error(
+              `outputPath escapes project directory: ${outputPath}`,
+            )
+          }
+          writeFileSync(resolvedOutput, graph, 'utf8')
           const result = {
             format,
             edgeTypes: edgeTypes ?? [],

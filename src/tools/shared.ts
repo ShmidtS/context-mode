@@ -32,7 +32,7 @@ export const VERSION: string = (() => {
   for (const rel of ["../package.json", "./package.json"]) {
     const p = resolve(__pkg_dir, rel);
     if (existsSync(p)) {
-      try { return JSON.parse(readFileSync(p, "utf8")).version; } catch {}
+      try { return JSON.parse(readFileSync(p, "utf8")).version; } catch (e) { console.warn("VERSION read failed", e) }
     }
   }
   return "unknown";
@@ -175,9 +175,9 @@ function maybeIndexSessionEvents(store: ContentStore): void {
       try {
         store.index({ path: filePath, source: "session-events" });
         unlinkSync(filePath);
-      } catch { /* best-effort per file */ }
+      } catch (e) { console.warn("maybeIndexSessionEvents index failed", e) }
     }
-  } catch { /* best-effort — session continuity never blocks tools */ }
+  } catch (e) { console.warn("maybeIndexSessionEvents failed", e) }
 }
 
 // ── Platform-aware paths ────────────────────────────────────
@@ -196,7 +196,7 @@ export function getSessionDir(): string {
       mkdirSync(dir, { recursive: true });
       return dir;
     }
-  } catch { /* fall through to .claude fallback */ }
+  } catch (e) { console.warn("getSessionDir detectPlatform failed", e) }
   const dir = join(homedir(), ".claude", "context-mode", "sessions");
   mkdirSync(dir, { recursive: true });
   return dir;
@@ -264,7 +264,7 @@ export function getStore(): ContentStore {
       _store.cleanupStaleSources(14);
       const legacyDir = join(homedir(), ".context-mode", "content");
       if (existsSync(legacyDir)) cleanupStaleContentDBs(legacyDir, 0);
-    } catch { /* best-effort */ }
+    } catch (e) { console.warn("getStore cleanupStaleContentDBs failed", e) }
 
     cleanupStaleDBs();
   }
@@ -278,7 +278,7 @@ export function resetStore(): void {
 
 export function closeStore(): void {
   if (_store) {
-    try { _store.close(); } catch { /* best effort */ }
+    try { _store.close(); } catch (e) { console.warn("closeStore failed", e) }
     _store = null;
   }
 }
@@ -374,8 +374,8 @@ function healCacheMidSession(): void {
         const rp = entry.installPath;
         if (!rp || existsSync(rp)) continue;
         if (!resolve(rp).startsWith(cacheRoot + sep)) continue;
-        try { if (statSync(rp).isSymbolicLink()) unlinkSync(rp); } catch {}
-        try { if (existsSync(rp)) unlinkSync(rp); } catch {}
+        try { if (statSync(rp).isSymbolicLink()) unlinkSync(rp); } catch (e) { console.warn("fixPluginSymlinks stat/unlink failed", e) }
+        try { if (existsSync(rp)) unlinkSync(rp); } catch (e) { console.warn("fixPluginSymlinks unlink failed", e) }
         const parent = dirname(rp);
         if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
         if (existsSync(pluginRoot)) {
@@ -383,7 +383,7 @@ function healCacheMidSession(): void {
         }
       }
     }
-  } catch { /* best effort */ }
+  } catch (e) { console.warn("fixPluginSymlinks failed", e) }
 }
 
 // ── Response tracking ──────────────────────────────────────
@@ -463,8 +463,8 @@ export function persistStats(bypassThrottle?: boolean): void {
         const life = getLifetimeStats({ sessionsDir: getSessionDir() });
         lifetimeTokens = (life?.totalEvents ?? 0) * TOKENS_PER_EVENT;
         _lifetimeCache = { tokens: lifetimeTokens, computedAt: now };
-      } catch {
-        // best-effort — keep stale cache or 0
+      } catch (err) {
+        console.warn("getLifetimeStats failed", err);
       }
     }
 
@@ -504,8 +504,8 @@ export function persistStats(bypassThrottle?: boolean): void {
     const tmpPath = `${filePath}.tmp`;
     writeFileSync(tmpPath, JSON.stringify(payload));
     renameSync(tmpPath, filePath);
-  } catch {
-    // best-effort — never break tool calls because of stats persistence
+  } catch (err) {
+    console.warn("renameSync failed", err);
   }
 }
 
@@ -534,7 +534,7 @@ export function restoreStatsOnStartup(): void {
         sessionStats.sessionStart = restored.sessionStart;
       }
     }
-  } catch { /* best effort — never block startup on a stats restore failure */ }
+  } catch (e) { console.warn("restoreStatsOnStartup failed", e) }
 }
 
 // ── FS read tracking preload for ctx_batch_execute ──────────
@@ -838,8 +838,8 @@ export function checkDenyPolicy(
         isError: true,
       });
     }
-  } catch {
-    // Security check failed — allow through (fail-open)
+  } catch (err) {
+    console.warn("trackResponse failed", err);
   }
   return null;
 }
@@ -865,8 +865,8 @@ export function checkNonShellDenyPolicy(
         });
       }
     }
-  } catch {
-    // Fail-open
+  } catch (err) {
+    console.warn("trackResponse failed", err);
   }
   return null;
 }
@@ -893,8 +893,8 @@ export function checkFilePathDenyPolicy(
         isError: true,
       });
     }
-  } catch {
-    // Fail-open
+  } catch (err) {
+    console.warn("trackResponse failed", err);
   }
   return null;
 }
@@ -911,7 +911,7 @@ export function coerceJsonArray(val: unknown): unknown {
     try {
       const parsed = JSON.parse(val);
       if (Array.isArray(parsed)) return parsed;
-    } catch { /* not valid JSON, let zod handle the error */ }
+    } catch (e) { console.warn("coerceJsonArray parse failed", e) }
   }
   return val;
 }

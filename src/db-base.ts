@@ -29,6 +29,34 @@ export interface PreparedStatement {
   iterate(...params: unknown[]): IterableIterator<unknown>;
 }
 
+/** Minimal interface for bun:sqlite Database used by BunSQLiteAdapter. */
+interface BunSQLiteDatabase {
+  prepare(sql: string): BunSQLiteStatement;
+  close(): void;
+  transaction(fn: (...args: unknown[]) => unknown): (...args: unknown[]) => unknown;
+}
+
+interface BunSQLiteStatement {
+  run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+  get(...args: unknown[]): unknown;
+  all(...args: unknown[]): unknown[];
+  iterate(...args: unknown[]): IterableIterator<unknown>;
+}
+
+/** Minimal interface for node:sqlite DatabaseSync used by NodeSQLiteAdapter. */
+interface NodeSQLiteDatabase {
+  prepare(sql: string): NodeSQLiteStatement;
+  exec(sql: string): void;
+  close(): void;
+}
+
+interface NodeSQLiteStatement {
+  run(...args: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+  get(...args: unknown[]): unknown;
+  all(...args: unknown[]): unknown[];
+  iterate?(...args: unknown[]): IterableIterator<unknown>;
+}
+
 // ─────────────────────────────────────────────────────────
 // bun:sqlite adapter (#45)
 // ─────────────────────────────────────────────────────────
@@ -38,13 +66,13 @@ export interface PreparedStatement {
  * Bridges: .pragma(), multi-statement .exec(), .get() null→undefined.
  */
 export class BunSQLiteAdapter {
-  #raw: any;
+  #raw: BunSQLiteDatabase;
 
-  constructor(rawDb: any) {
+  constructor(rawDb: BunSQLiteDatabase) {
     this.#raw = rawDb;
   }
 
-  pragma(source: string): any {
+  pragma(source: string): unknown {
     const stmt = this.#raw.prepare(`PRAGMA ${source}`);
     const rows = stmt.all();
     if (!rows || rows.length === 0) return undefined;
@@ -55,7 +83,7 @@ export class BunSQLiteAdapter {
     return values.length === 1 ? values[0] : rows[0];
   }
 
-  exec(sql: string): any {
+  exec(sql: string): this {
     // bun:sqlite .exec() is single-statement only.
     // Split multi-statement SQL respecting string literals (don't split on ; inside quotes).
     let current = "";
@@ -81,7 +109,7 @@ export class BunSQLiteAdapter {
     return this;
   }
 
-  prepare(sql: string): any {
+  prepare(sql: string): PreparedStatement {
     const stmt = this.#raw.prepare(sql);
     return {
       run: (...args: unknown[]) => stmt.run(...args),
@@ -94,7 +122,7 @@ export class BunSQLiteAdapter {
     };
   }
 
-  transaction(fn: (...args: any[]) => any): any {
+  transaction(fn: (...args: unknown[]) => unknown): (...args: unknown[]) => unknown {
     return this.#raw.transaction(fn);
   }
 
@@ -113,13 +141,13 @@ export class BunSQLiteAdapter {
  * Eliminates native addon SIGSEGV on Linux (nodejs/node#62515).
  */
 export class NodeSQLiteAdapter {
-  #raw: any; // DatabaseSync instance
+  #raw: NodeSQLiteDatabase;
 
-  constructor(rawDb: any) {
+  constructor(rawDb: NodeSQLiteDatabase) {
     this.#raw = rawDb;
   }
 
-  pragma(source: string): any {
+  pragma(source: string): unknown {
     // "journal_mode = WAL" → PRAGMA journal_mode = WAL
     // "table_xinfo(session_events)" → PRAGMA table_xinfo(session_events)
     // "wal_checkpoint(TRUNCATE)" → PRAGMA wal_checkpoint(TRUNCATE)
@@ -131,13 +159,13 @@ export class NodeSQLiteAdapter {
     return values.length === 1 ? values[0] : rows[0];
   }
 
-  exec(sql: string): any {
+  exec(sql: string): this {
     // node:sqlite's exec() supports multi-statement natively
     this.#raw.exec(sql);
     return this;
   }
 
-  prepare(sql: string): any {
+  prepare(sql: string): PreparedStatement {
     const stmt = this.#raw.prepare(sql);
     return {
       run: (...args: unknown[]) => stmt.run(...args),
@@ -156,9 +184,9 @@ export class NodeSQLiteAdapter {
     };
   }
 
-  transaction(fn: (...args: any[]) => any): any {
+  transaction(fn: (...args: unknown[]) => unknown): (...args: unknown[]) => unknown {
     // node:sqlite has no transaction() method — manual BEGIN/COMMIT/ROLLBACK
-    return (...args: any[]) => {
+    return (...args: unknown[]) => {
       this.#raw.exec("BEGIN");
       try {
         const result = fn(...args);
@@ -192,11 +220,11 @@ export function loadDatabase(): typeof DatabaseConstructor {
   if (!_Database) {
     const require = createRequire(import.meta.url);
 
-    if ((globalThis as any).Bun) {
+    if ((globalThis as Record<string, unknown>).Bun) {
       // Bun runtime — use bun:sqlite directly.
       // Array.join() prevents esbuild from resolving the specifier at bundle time.
       const BunDB = require(["bun", "sqlite"].join(":")).Database;
-      _Database = function BunDatabaseFactory(path: string, opts?: any) {
+      _Database = function BunDatabaseFactory(path: string, opts?: { readonly?: boolean; timeout?: number }) {
         const raw = new BunDB(path, {
           readonly: opts?.readonly,
           create: true,
@@ -208,18 +236,18 @@ export function loadDatabase(): typeof DatabaseConstructor {
           adapter.pragma(`busy_timeout = ${opts.timeout}`);
         }
         return adapter;
-      } as any;
+      } as unknown as typeof DatabaseConstructor;
     } else if (process.platform === "linux") {
       // Linux — try node:sqlite to avoid native addon SIGSEGV (nodejs/node#62515).
       // node:sqlite is built into Node >= 22.5, no flag needed since 22.13.
       try {
         const { DatabaseSync } = require(["node", "sqlite"].join(":"));
-        _Database = function NodeDatabaseFactory(path: string, opts?: any) {
+        _Database = function NodeDatabaseFactory(path: string, opts?: { readonly?: boolean; timeout?: number }) {
           const raw = new DatabaseSync(path, {
             readOnly: opts?.readonly ?? false,
           });
           return new NodeSQLiteAdapter(raw);
-        } as any;
+        } as unknown as typeof DatabaseConstructor;
       } catch {
         // node:sqlite not available — fall through to better-sqlite3
         _Database = require("better-sqlite3") as typeof DatabaseConstructor;
@@ -254,7 +282,7 @@ export function applyWALPragmas(db: DatabaseInstance): void {
   // the page cache. 256MB is a safe upper bound (SQLite only maps up to
   // the actual file size). Falls back gracefully on platforms where mmap
   // is unavailable or restricted.
-  try { db.pragma("mmap_size = 268435456"); } catch { /* unsupported runtime */ }
+  try { db.pragma("mmap_size = 268435456"); } catch (e) { console.warn("applyWALPragmas mmap_size failed", e) }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -269,7 +297,7 @@ export function applyWALPragmas(db: DatabaseInstance): void {
 export function cleanOrphanedWALFiles(dbPath: string): void {
   if (!existsSync(dbPath)) {
     for (const suffix of ["-wal", "-shm"]) {
-      try { unlinkSync(dbPath + suffix); } catch { /* ignore */ }
+      try { unlinkSync(dbPath + suffix); } catch (e) { console.warn("cleanOrphanedWALFiles unlink failed", e) }
     }
   }
 }
@@ -283,8 +311,8 @@ export function deleteDBFiles(dbPath: string): void {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       unlinkSync(dbPath + suffix);
-    } catch {
-      // ignore — file may not exist
+    } catch (e) {
+      console.warn("deleteDBFiles unlink failed", e)
     }
   }
 }
@@ -297,11 +325,11 @@ export function closeDB(db: DatabaseInstance): void {
   try {
     // Checkpoint WAL before close to prevent contention on restart (#103)
     db.pragma("wal_checkpoint(TRUNCATE)");
-  } catch { /* WAL may not be active */ }
+  } catch (e) { console.warn("closeDB wal_checkpoint failed", e) }
   try {
     db.close();
-  } catch {
-    // ignore
+  } catch (e) {
+    console.warn("closeDB db.close failed", e)
   }
 }
 
@@ -378,7 +406,7 @@ export function renameCorruptDB(dbPath: string): void {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       renameSync(dbPath + suffix, `${dbPath}${suffix}.corrupt-${ts}`);
-    } catch { /* file may not exist */ }
+    } catch (e) { console.warn("renameCorruptDB rename failed", e) }
   }
 }
 

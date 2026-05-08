@@ -61,8 +61,8 @@ export function persistToolCallCounter(
     } finally {
       sdb.close();
     }
-  } catch {
-    // Best-effort: counter must never throw and break the parent tool call.
+  } catch (err) {
+    console.warn("persistToolCall failed", err);
   }
 }
 
@@ -103,8 +103,8 @@ export function restoreSessionStats(
           const parsed = Date.parse(`${meta.started_at}Z`);
           if (Number.isFinite(parsed) && parsed > 0) sessionStart = parsed;
         }
-      } catch {
-        // best-effort — keep `Date.now()` fallback
+      } catch (err) {
+        console.warn("parsed failed", err);
       }
 
       // Skip empty restores so callers can `if (restored)` and not stomp

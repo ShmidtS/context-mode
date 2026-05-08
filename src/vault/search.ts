@@ -489,8 +489,8 @@ export class VaultGraphSearch {
         }
         return result;
       }
-    } catch {
-      // Not valid JSON — return undefined
+    } catch (err) {
+      console.warn("String failed", err);
     }
     return undefined;
   }

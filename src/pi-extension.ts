@@ -22,6 +22,58 @@ import type { HookInput } from "./session/extract.js";
 import { buildResumeSnapshot } from "./session/snapshot.js";
 import type { SessionEvent } from "./types.js";
 
+// ── Pi Extension API types ───────────────────────────────
+
+interface PiCommandContext {
+  hasUI?: boolean;
+  ui?: { notify(text: string, level: string): void };
+}
+
+interface PiSessionStartContext {
+  sessionManager?: { getSessionFile?(): string };
+}
+
+interface PiToolCallEvent {
+  toolName?: string;
+  input?: { command?: string };
+}
+
+interface PiToolResultEvent {
+  toolName?: string;
+  tool_name?: string;
+  params?: Record<string, unknown>;
+  input?: Record<string, unknown>;
+  result?: unknown;
+  output?: unknown;
+  error?: unknown;
+  isError?: boolean;
+}
+
+interface PiBeforeAgentStartEvent {
+  prompt?: string;
+  systemPrompt?: string;
+}
+
+interface PiBeforeProviderResponseEvent {
+  model?: string;
+  providerModel?: string;
+  provider?: string;
+  latencyMs?: number;
+  latency?: number;
+  usage?: unknown;
+  tokens?: unknown;
+}
+
+interface PiExtensionAPI {
+  on(event: "session_start", handler: (ctx?: PiSessionStartContext) => void): void;
+  on(event: "tool_call", handler: (event: PiToolCallEvent) => unknown): void;
+  on(event: "tool_result", handler: (event: PiToolResultEvent) => void): void;
+  on(event: "before_agent_start", handler: (event: PiBeforeAgentStartEvent) => Promise<unknown>): void;
+  on(event: "before_provider_response", handler: (event: PiBeforeProviderResponseEvent) => void): void;
+  on(event: string, handler: (...args: unknown[]) => unknown): void;
+  registerCommand(name: string, config: { description: string; handler: (...args: unknown[]) => Promise<unknown> }): void;
+}
+
 // ── Pi Tool Name Mapping ─────────────────────────────────
 // Pi uses lowercase; shared extractors expect PascalCase (Claude Code convention).
 const PI_TOOL_MAP: Record<string, string> = {
@@ -115,17 +167,15 @@ function getOrCreateDB(): SessionDB {
 }
 
 /** Derive a stable session ID from Pi's session file path (SHA256, 16 hex chars). */
-function deriveSessionId(ctx: Record<string, unknown>): string {
+function deriveSessionId(ctx: PiSessionStartContext | Record<string, unknown> | null | undefined): string {
   try {
-    const sessionManager = ctx.sessionManager as
-      | { getSessionFile?: () => string }
-      | undefined;
-    const sessionFile = sessionManager?.getSessionFile?.();
+    const sessionManager = ctx?.sessionManager;
+    const sessionFile = (sessionManager as { getSessionFile?: () => string } | undefined)?.getSessionFile?.();
     if (sessionFile && typeof sessionFile === "string") {
       return createHash("sha256").update(sessionFile).digest("hex").slice(0, 16);
     }
-  } catch {
-    // best effort
+  } catch (err) {
+    console.warn("resolveSessionId failed", err);
   }
   return `pi-${Date.now()}`;
 }
@@ -169,18 +219,18 @@ function buildStatsText(db: SessionDB, sessionId: string): string {
   }
 }
 
-function resolveCommandContext(argsOrCtx: unknown, ctx: unknown): any {
-  if (ctx !== undefined) return ctx;
-  if (argsOrCtx && typeof argsOrCtx === "object") return argsOrCtx;
+function resolveCommandContext(argsOrCtx: unknown, ctx: unknown): PiCommandContext | null | undefined {
+  if (ctx !== undefined) return ctx as PiCommandContext | null;
+  if (argsOrCtx && typeof argsOrCtx === "object") return argsOrCtx as PiCommandContext;
   return undefined;
 }
 
 function handleCommandText(
   text: string,
-  ctx: any,
+  ctx: PiCommandContext | null | undefined,
 ): { text: string } | undefined {
   if (ctx?.hasUI) {
-    ctx.ui.notify(text, "info");
+    ctx.ui?.notify(text, "info");
     return;
   }
 
@@ -190,7 +240,7 @@ function handleCommandText(
 // ── Extension entry point ────────────────────────────────
 
 /** Pi extension default export. Called once by Pi runtime with the extension API. */
-export default function piExtension(pi: any): void {
+export default function piExtension(pi: PiExtensionAPI): void {
   const buildDir = dirname(fileURLToPath(import.meta.url));
   const pluginRoot = resolve(buildDir, "..");
   const projectDir = process.env.PI_PROJECT_DIR || process.cwd();
@@ -199,7 +249,7 @@ export default function piExtension(pi: any): void {
 
   // ── 1. session_start — Initialize session ──────────────
 
-  pi.on("session_start", (ctx: any) => {
+  pi.on("session_start", (ctx?: PiSessionStartContext) => {
     try {
       _sessionId = deriveSessionId(ctx ?? {});
       db.ensureSession(_sessionId, projectDir);
@@ -215,7 +265,7 @@ export default function piExtension(pi: any): void {
   // ── 2. tool_call — PreToolUse routing enforcement ──────
   // Block bash commands that contain curl/wget/fetch/requests patterns.
 
-  pi.on("tool_call", (event: any) => {
+  pi.on("tool_call", (event: PiToolCallEvent) => {
     try {
       const toolName = String(event?.toolName ?? "").toLowerCase();
       if (toolName !== "bash") return;
@@ -232,14 +282,14 @@ export default function piExtension(pi: any): void {
             "Raw curl/wget/fetch output floods the context window.",
         };
       }
-    } catch {
-      // Routing failure — allow passthrough
+    } catch (err) {
+      console.warn("before_tool_call routing failed", err);
     }
   });
 
   // ── 3. tool_result — PostToolUse event capture ─────────
 
-  pi.on("tool_result", (event: any) => {
+  pi.on("tool_result", (event: PiToolResultEvent) => {
     try {
       if (!_sessionId) return;
 
@@ -293,14 +343,14 @@ export default function piExtension(pi: any): void {
           "PostToolUse",
         );
       }
-    } catch {
-      // Silent — session capture must never break the tool call
+    } catch (err) {
+      console.warn("tool_result capture failed", err);
     }
   });
 
   // ── 4. before_agent_start — Routing + active_memory + resume injection ─
 
-  pi.on("before_agent_start", async (event: any) => {
+  pi.on("before_agent_start", async (event: PiBeforeAgentStartEvent) => {
     try {
       if (!_sessionId) return;
 
@@ -342,7 +392,7 @@ export default function piExtension(pi: any): void {
         let memoryContext = "";
         if (buildAuto) {
           memoryContext = buildAuto(
-            activeEvents.map((e: any) => ({
+            activeEvents.map((e: { category: string; data: string }) => ({
               category: String(e.category ?? ""),
               data: String(e.data ?? ""),
             })),
@@ -376,8 +426,8 @@ export default function piExtension(pi: any): void {
       if (parts.length > baseLen) {
         return { systemPrompt: parts.join("\n\n") };
       }
-    } catch {
-      // best effort — never break agent start
+    } catch (err) {
+      console.warn("before_agent_start prompt injection failed", err);
     }
   });
 
@@ -386,7 +436,7 @@ export default function piExtension(pi: any): void {
   // model, and token usage when Pi exposes them. Best-effort only;
   // the handler must never throw or modify the response.
 
-  pi.on("before_provider_response", (event: any) => {
+  pi.on("before_provider_response", (event: PiBeforeProviderResponseEvent) => {
     try {
       if (!_sessionId) return;
       const meta = {
@@ -416,8 +466,8 @@ export default function piExtension(pi: any): void {
         },
         "PostToolUse",
       );
-    } catch {
-      // best effort — never break provider response
+    } catch (err) {
+      console.warn("before_provider_response capture failed", err);
     }
   });
 
@@ -436,8 +486,8 @@ export default function piExtension(pi: any): void {
       });
 
       db.upsertResume(_sessionId, snapshot, allEvents.length);
-    } catch {
-      // best effort — never break compaction
+    } catch (err) {
+      console.warn("session_before_compact snapshot failed", err);
     }
   });
 
@@ -447,8 +497,8 @@ export default function piExtension(pi: any): void {
     try {
       if (!_sessionId) return;
       db.incrementCompactCount(_sessionId);
-    } catch {
-      // best effort
+    } catch (err) {
+      console.warn("incrementCompactCount failed", err);
     }
   });
 
@@ -462,8 +512,8 @@ export default function piExtension(pi: any): void {
       _db = null;
       _routingInjected.clear();
       _sessionId = "";
-    } catch {
-      // best effort — never throw during shutdown
+    } catch (err) {
+      console.warn("incrementCompactCount failed", err);
     }
   });
 

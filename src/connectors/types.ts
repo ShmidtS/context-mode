@@ -1,6 +1,6 @@
 /**
  * connectors/types — Connector interface and shared types for external
- * knowledge source integration (GitHub, Notion, Slack, etc.).
+ * knowledge source integration (GitHub, etc.).
  */
 
 // ─────────────────────────────────────────────────────────
@@ -8,7 +8,7 @@
 // ─────────────────────────────────────────────────────────
 
 export interface ConnectorConfig {
-  type: 'github' | 'notion' | 'slack'
+  type: 'github'
   config: Record<string, unknown>
 }
 

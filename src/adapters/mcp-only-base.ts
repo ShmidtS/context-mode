@@ -80,8 +80,6 @@ export abstract class McpOnlyBaseAdapter extends BaseAdapter {
 
   // ── Hook configuration (no-ops) ──────────────────────────────
 
-  abstract readSettings(): Record<string, unknown> | null;
-  abstract writeSettings(settings: Record<string, unknown>): void;
   abstract validateHooks(pluginRoot: string): DiagnosticResult[];
   abstract checkPluginRegistration(): DiagnosticResult;
   abstract getInstalledVersion(): string;

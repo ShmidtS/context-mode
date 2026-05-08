@@ -247,10 +247,10 @@ export function splitChainedCommands(command: string): string[] {
 // ==============================================================================
 
 // Cache parsed JSON from settings files, invalidated by mtime change
-const settingsFileCache = new Map<string, { mtimeMs: number; parsed: any }>();
+const settingsFileCache = new Map<string, { mtimeMs: number; parsed: Record<string, unknown> }>();
 
 /** Read and parse a JSON file, caching by mtime. Returns null if missing/invalid. */
-function readCachedJson(path: string): any | null {
+function readCachedJson(path: string): Record<string, unknown> | null {
   try {
     const stat = statSync(path);
     const cached = settingsFileCache.get(path);
@@ -272,7 +272,7 @@ function readSingleSettings(path: string): SecurityPolicy | null {
   const parsed = readCachedJson(path);
   if (parsed === null) return null;
 
-  const perms = parsed?.permissions;
+  const perms = parsed?.permissions as Record<string, unknown> | undefined;
   if (!perms || typeof perms !== "object") return null;
 
   const filterBash = (arr: unknown): string[] => {
@@ -283,9 +283,9 @@ function readSingleSettings(path: string): SecurityPolicy | null {
   };
 
   return {
-    allow: filterBash(perms.allow),
-    deny: filterBash(perms.deny),
-    ask: filterBash(perms.ask),
+    allow: filterBash(perms["allow"]),
+    deny: filterBash(perms["deny"]),
+    ask: filterBash(perms["ask"]),
   };
 }
 
@@ -344,7 +344,8 @@ export function readToolDenyPatterns(
     const parsed = readCachedJson(path);
     if (parsed === null) return null;
 
-    const deny = parsed?.permissions?.deny;
+    const perms = parsed?.permissions as Record<string, unknown> | undefined;
+    const deny = perms?.deny;
     if (!Array.isArray(deny)) return [];
 
     const globs: string[] = [];
@@ -497,8 +498,8 @@ export function evaluateFilePath(
     candidates.add(toForward(lexical));
     try {
       candidates.add(toForward(realpathSync(lexical)));
-    } catch {
-      // File does not exist yet, or realpath failed — rely on lexical form.
+    } catch (err) {
+      console.warn("realpathSync failed", err);
     }
   }
 

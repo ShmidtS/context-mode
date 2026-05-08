@@ -251,7 +251,7 @@ export function registerCtxIndex(
             if (existsSync(dbFile)) {
               timelineDB = new SessionDB({ dbPath: dbFile });
             }
-          } catch { /* SessionDB unavailable */ }
+          } catch (e) { console.warn("ctx_search SessionDB failed", e) }
         }
 
         const { vaultStore, vaultSearch } = await acquireVaultStores();
@@ -318,7 +318,7 @@ export function registerCtxIndex(
           totalSize += formatted.length;
         }
         } finally {
-          try { timelineDB?.close(); } catch {}
+          try { timelineDB?.close(); } catch (e) { console.warn("ctx_search timelineDB close failed", e) }
         }
 
         let output = sections.join("\n\n---\n\n");

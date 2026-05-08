@@ -138,15 +138,6 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
     };
   }
 
-  readSettings(): Record<string, unknown> | null {
-    try {
-      const raw = readFileSync(this.getSettingsPath(), "utf-8");
-      return JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }
-
   writeSettings(settings: Record<string, unknown>): void {
     writeFileSync(
       this.getSettingsPath(),
@@ -215,7 +206,7 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
         const raw = readFileSync(candidate, "utf-8");
         const parsed = JSON.parse(raw) as { hooks?: Record<string, unknown[]> };
         if (parsed.hooks) return parsed.hooks;
-      } catch { /* not available */ }
+      } catch (e) { console.warn("loadHooks readFileSync failed", e) }
     }
     return undefined;
   }
@@ -305,8 +296,8 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
           return arr[0].version;
         }
       }
-    } catch {
-      /* fallback below */
+    } catch (err) {
+      console.warn("detectInstalledVersion plugins failed", err);
     }
 
     // Fallback: scan common plugin cache locations
@@ -336,8 +327,8 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
             return 0;
           });
         if (versions.length > 0) return versions[versions.length - 1];
-      } catch {
-        /* continue */
+      } catch (err) {
+        console.warn("detectInstalledVersion cache scan failed", err);
       }
     }
     return "not installed";
@@ -501,8 +492,8 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
         accessSync(scriptPath, constants.R_OK);
         chmodSync(scriptPath, 0o755);
         set.push(scriptPath);
-      } catch {
-        /* skip missing scripts */
+      } catch (err) {
+        console.warn("chmodSync failed", err);
       }
     }
     return set;
@@ -526,8 +517,8 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
         }
       }
       writeFileSync(ipPath, JSON.stringify(ipRaw, null, 2) + "\n", "utf-8");
-    } catch {
-      /* best effort */
+    } catch (err) {
+      console.warn("writeFileSync failed", err);
     }
   }
 

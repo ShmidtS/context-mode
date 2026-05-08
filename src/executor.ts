@@ -73,7 +73,7 @@ const OS_TMPDIR = (() => {
     ).trim();
     const dir = process.platform === "darwin" ? result : resolve(result, "..");
     if (dir && dir !== process.cwd()) return dir;
-  } catch { /* fall through */ }
+  } catch (e) { console.warn("detectAltTempDir failed", e) }
   return "/tmp";
 })();
 
@@ -82,12 +82,12 @@ function killTree(proc: ReturnType<typeof spawn>): void {
   if (isWin && proc.pid) {
     try {
       execSync(`taskkill /F /T /PID ${proc.pid}`, { stdio: "pipe" });
-    } catch { /* already dead */ }
+    } catch (e) { console.warn("killTree taskkill failed", e) }
   } else if (proc.pid) {
     try {
       // Kill entire process group (negative PID) to prevent orphaned children
       process.kill(-proc.pid, "SIGKILL");
-    } catch { /* already dead */ }
+    } catch (e) { console.warn("killTree process.kill failed", e) }
   }
 }
 
@@ -149,7 +149,7 @@ export class PolyglotExecutor {
       try {
         // Kill process group on Unix to catch all children
         process.kill(isWin ? pid : -pid, "SIGTERM");
-      } catch { /* already dead */ }
+      } catch (e) { console.warn("cleanupBackgrounded kill failed", e) }
     }
     this.#backgroundedPids.clear();
   }
@@ -177,14 +177,14 @@ export class PolyglotExecutor {
       if (!result.backgrounded) {
         try {
           rmSync(tmpDir, { recursive: true, force: true });
-        } catch { /* ignore */ }
+        } catch (e) { console.warn("rmSync tmpDir failed", e) }
       }
 
       return result;
     } catch (err) {
       try {
         rmSync(tmpDir, { recursive: true, force: true });
-      } catch { /* ignore */ }
+      } catch (e) { console.warn("rmSync tmpDir on error failed", e) }
       throw err;
     }
   }
@@ -252,7 +252,7 @@ export class PolyglotExecutor {
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch (err: unknown) {
-      const message = err instanceof Error ? (err as any).stderr || err.message : String(err);
+      const message = err instanceof Error ? ((err as Error & { stderr?: string }).stderr || err.message) : String(err);
       return {
         stdout: "",
         stderr: `Compilation failed:\n${message}`,

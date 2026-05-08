@@ -310,8 +310,8 @@ export default {
           if (existsSync(instructionsPath)) {
             routingInstructions = readFileSync(instructionsPath, "utf-8");
           }
-        } catch {
-          // best effort
+        } catch (err) {
+          console.warn("loadRoutingInstructions failed", err);
         }
       }
 
@@ -431,8 +431,8 @@ export default {
             );
             log.debug("after_tool_call", { tool: rawToolName, mapped: rawToolName, sessionId: routedSessionId.slice(0, 8), events: 1, durationMs: e.durationMs });
           }
-        } catch {
-          // Silent — session capture must never break the tool call
+        } catch (err) {
+          console.warn("after_tool_call capture failed", err);
         }
       },
     );
@@ -445,8 +445,8 @@ export default {
         try {
           log.debug("command:new", { sessionId: sessionId.slice(0, 8) });
           db.cleanupOldSessions(7);
-        } catch {
-          // best effort
+        } catch (err) {
+          console.warn("command:new failed", err);
         }
       },
       {
@@ -464,8 +464,8 @@ export default {
         try {
           log.debug("command:reset", { sessionId: sessionId.slice(0, 8) });
           db.cleanupOldSessions(7);
-        } catch {
-          // best effort
+        } catch (err) {
+          console.warn("command:reset failed", err);
         }
       },
       {
@@ -483,8 +483,8 @@ export default {
             workspaceRouter.removeSession(sessionKey);
           }
           db.cleanupOldSessions(7);
-        } catch {
-          // best effort
+        } catch (err) {
+          console.warn("command:stop failed", err);
         }
       },
       {
@@ -535,8 +535,8 @@ export default {
           // workspace. Derive the workspace directory from the sessionKey so we
           // only write into recognised /.openclaw/workspace* paths, never into
           // the gateway's cwd or any other arbitrary directory.
-        } catch {
-          // best effort — never break session start
+        } catch (err) {
+          console.warn("session_start hook failed", err);
         }
       },
     );
@@ -559,8 +559,8 @@ export default {
             compactCount: (freshStats?.compact_count ?? 0) + 1,
           });
           db.upsertResume(sid, snapshot, allEvents.length);
-        } catch {
-          // best effort — never break compaction
+        } catch (err) {
+          console.warn("before_compaction snapshot failed", err);
         }
       },
     );
@@ -574,8 +574,8 @@ export default {
           const sid = sessionId;
           log.debug("after_compaction", { sessionId: sid.slice(0, 8) });
           db.incrementCompactCount(sid); // sessionId consistent with before_compaction within same sync cycle
-        } catch {
-          // best effort
+        } catch (err) {
+          console.warn("after_compaction failed", err);
         }
       },
     );
@@ -601,8 +601,8 @@ export default {
           for (const ev of events) {
             db.insertEvent(sid, ev as import("./types.js").SessionEvent, "PostToolUse");
           }
-        } catch {
-          // best effort — never break model resolution
+        } catch (err) {
+          console.warn("before_model_resolve capture failed", err);
         }
       },
     );
@@ -685,8 +685,8 @@ export default {
             compactCount: freshStats?.compact_count ?? 0,
           });
           db.upsertResume(sid, snapshot, allEvents.length);
-        } catch {
-          // best effort — never break session shutdown
+        } catch (err) {
+          console.warn("session_end snapshot failed", err);
         }
       },
     );

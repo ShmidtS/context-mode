@@ -618,7 +618,7 @@ async function insightPrepareCache(
     } catch {
       try {
         rmSync(join(cacheDir, "node_modules"), { recursive: true, force: true });
-      } catch {}
+      } catch (e) { console.warn("rmSync node_modules failed", e) }
       throw new Error("npm install failed — please retry");
     }
     if (
@@ -855,7 +855,7 @@ async function upgradePullBuildAndInstall(
         cpSync(resolve(tmpDir, item), resolve(pluginRoot, item), {
           recursive: true,
         });
-      } catch { /* some files may not exist in source */ }
+      } catch (e) { console.warn("copyUpgradeFiles failed", e) }
     }
 
     const mcpConfig = {
@@ -989,7 +989,7 @@ async function upgradePullBuildAndInstall(
           }
         }
       }
-    } catch { /* best effort — registry may not exist or be malformed */ }
+    } catch (e) { console.warn("syncSkills registry read failed", e) }
 
     changes.push(`Updated v${localVersion} → v${newVersion}`);
     p.log.success(
@@ -1004,7 +1004,7 @@ async function upgradePullBuildAndInstall(
     p.log.info(color.dim("Continuing with hooks/settings fix..."));
     try {
       rmSync(tmpDir, { recursive: true, force: true });
-    } catch { /* ignore */ }
+    } catch (e) { console.warn("chmodSync failed", e) }
     return { success: false, upToDate: false };
   }
 }
@@ -1062,7 +1062,7 @@ function upgradeSetPermissions(
         accessSync(binPath, constants.F_OK);
         chmodSync(binPath, 0o755);
         permSet.push(binPath);
-      } catch { /* not found — skip */ }
+      } catch (e) { console.warn("setPermissions accessSync failed", e) }
     }
   }
   if (permSet.length > 0) {
@@ -1195,7 +1195,7 @@ function statuslineForward(): void {
         }
       }
     }
-  } catch { /* registry malformed — fall through to other candidates */ }
+  } catch (e) { console.warn("readStatuslinePath registry failed", e) }
 
   const scriptPath = candidates.find((c) => existsSync(c));
   if (!scriptPath) {

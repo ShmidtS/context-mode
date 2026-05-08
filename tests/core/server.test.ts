@@ -2707,9 +2707,9 @@ describe("SSRF guard — ssrfGuard policy in src/tools/admin.ts", () => {
     expect(serverSrc).toContain("link-local / IMDS / multicast / reserved");
   });
 
-  test("strict mode opt-in via CTX_FETCH_STRICT=1", async () => {
-    expect(serverSrc).toContain('process.env.CTX_FETCH_STRICT === "1"');
-    expect(serverSrc).toContain('verdict === "private" && strict');
+  test("private IPs blocked by default, allowed via CTX_FETCH_ALLOW_PRIVATE=1", async () => {
+    expect(serverSrc).toContain('process.env.CTX_FETCH_ALLOW_PRIVATE === "1"');
+    expect(serverSrc).toContain('verdict === "private" && !allowPrivate');
   });
 
   test("ssrfGuard runs BEFORE cache lookup (poisoned cache defense)", async () => {

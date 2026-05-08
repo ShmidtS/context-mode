@@ -273,15 +273,6 @@ export class GeminiCLIAdapter extends BaseAdapter implements HookAdapter {
     };
   }
 
-  readSettings(): Record<string, unknown> | null {
-    try {
-      const raw = readFileSync(this.getSettingsPath(), "utf-8");
-      return JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }
-
   writeSettings(settings: Record<string, unknown>): void {
     const dir = resolve(homedir(), ".gemini");
     mkdirSync(dir, { recursive: true });
@@ -404,21 +395,7 @@ export class GeminiCLIAdapter extends BaseAdapter implements HookAdapter {
   }
 
   getInstalledVersion(): string {
-    // Check ~/.gemini/ extension cache for context-mode
-    try {
-      const cachePath = resolve(
-        homedir(),
-        ".gemini",
-        "extensions",
-        "context-mode",
-        "package.json",
-      );
-      const pkg = JSON.parse(readFileSync(cachePath, "utf-8"));
-      if (typeof pkg.version === "string") return pkg.version;
-    } catch {
-      /* not found */
-    }
-    return "not installed";
+    return this.readVersionFromExtensionCache([".gemini"]);
   }
 
   // ── Upgrade ────────────────────────────────────────────
@@ -464,8 +441,8 @@ export class GeminiCLIAdapter extends BaseAdapter implements HookAdapter {
         accessSync(scriptPath, constants.R_OK);
         chmodSync(scriptPath, 0o755);
         set.push(scriptPath);
-      } catch {
-        /* skip missing scripts */
+      } catch (err) {
+        console.warn("chmodSync failed", err);
       }
     }
     return set;
@@ -487,8 +464,8 @@ export class GeminiCLIAdapter extends BaseAdapter implements HookAdapter {
       pkg.installPath = pluginRoot;
       pkg.lastUpdated = new Date().toISOString();
       writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
-    } catch {
-      /* best effort */
+    } catch (err) {
+      console.warn("writeFileSync failed", err);
     }
   }
 

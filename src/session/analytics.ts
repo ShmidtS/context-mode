@@ -531,7 +531,7 @@ export function getLifetimeStats(opts?: {
     let dbFiles: string[] = [];
     try {
       dbFiles = readdirSync(sessionsDir).filter((f) => f.endsWith(".db"));
-    } catch { /* unreadable */ }
+    } catch (e) { console.warn("getLifetimeStats readdir sessionsDir failed", e) }
 
     if (dbFiles.length > 0) {
       // Lazy-load better-sqlite3 / bun-sqlite via the same path the runtime uses.
@@ -540,7 +540,7 @@ export function getLifetimeStats(opts?: {
         DatabaseCtor = opts?.loadDatabase
           ? (opts.loadDatabase() as ReturnType<typeof loadDatabaseImpl>)
           : loadDatabaseImpl();
-      } catch { /* sqlite unavailable */ }
+      } catch (e) { console.warn("getLifetimeStats loadDatabase failed", e) }
 
       if (DatabaseCtor) {
         for (const file of dbFiles) {
@@ -563,14 +563,14 @@ export function getLifetimeStats(opts?: {
                   if (!row.category) continue;
                   categoryCounts[row.category] = (categoryCounts[row.category] ?? 0) + (row.cnt ?? 0);
                 }
-              } catch {
-                // older schema / no category column — ignore
+              } catch (err) {
+                console.warn("aggregateCategoryCounts failed", err);
               }
             } finally {
               sdb.close();
             }
-          } catch {
-            // missing tables / corrupt file — skip
+          } catch (err) {
+            console.warn("aggregateSessionDB failed", err);
           }
         }
       }
@@ -590,7 +590,7 @@ export function getLifetimeStats(opts?: {
           return statSync(join(memoryRoot, entry)).isDirectory();
         } catch { return false; }
       });
-    } catch { /* unreadable */ }
+    } catch (e) { console.warn("getLifetimeStats readdir memoryRoot failed", e) }
 
     for (const proj of projectDirs) {
       const memDir = join(memoryRoot, proj, "memory");

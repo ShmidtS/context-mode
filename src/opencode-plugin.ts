@@ -43,7 +43,7 @@ const VERSION: string = (() => {
       const p = resolve(pkgRoot, rel);
       if (existsSync(p)) return JSON.parse(readFileSync(p, "utf8")).version ?? "unknown";
     }
-  } catch { /* fall through */ }
+  } catch (e) { console.warn("VERSION read failed", e) }
   return "unknown";
 })();
 
@@ -272,8 +272,8 @@ async function createContextModePlugin(ctx: PluginContext) {
           data: content,
           priority: 1,
         } as SessionEvent, "PluginInit");
-      } catch {
-        // file missing or unreadable — skip silently
+      } catch (err) {
+        console.warn("injectSessionEvents failed", err);
       }
     }
   }
@@ -333,8 +333,8 @@ async function createContextModePlugin(ctx: PluginContext) {
           // Cast: extract.ts SessionEvent lacks data_hash (computed by insertEvent)
           db.insertEvent(sessionId, event as SessionEvent, "PostToolUse");
         }
-      } catch {
-        // Silent — session capture must never break the tool call
+      } catch (err) {
+        console.warn("post_tool_call capture failed", err);
       }
     },
 
@@ -370,8 +370,8 @@ async function createContextModePlugin(ctx: PluginContext) {
         for (const ev of userEvents) {
           db.insertEvent(sessionId, ev as SessionEvent, "UserPromptSubmit");
         }
-      } catch {
-        // Silent — chat.message must never break the turn
+      } catch (err) {
+        console.warn("chat_message capture failed", err);
       }
     },
 
@@ -405,8 +405,8 @@ async function createContextModePlugin(ctx: PluginContext) {
           if (autoBlock && autoBlock.length > 0) {
             output.context.push(autoBlock);
           }
-        } catch {
-          // Auto-injection failure must NOT break the snapshot path.
+        } catch (err) {
+          console.warn("preCompact autoInjection failed", err);
         }
 
         return snapshot;
@@ -444,8 +444,8 @@ async function createContextModePlugin(ctx: PluginContext) {
           const marker = `<!-- context-mode v${VERSION}: routing block injected (sessionID=${sessionId.slice(0, 8)}) -->\n`;
           output.system.splice(1, 0, marker + routingBlock);
           routingInjected.add(sessionId);
-        } catch {
-          // Never break the chat turn on routing-block injection failure.
+        } catch (err) {
+          console.warn("routingBlock injection failed", err);
         }
       }
 
@@ -480,8 +480,8 @@ async function createContextModePlugin(ctx: PluginContext) {
           // Mark consumed only AFTER successful splice so failed paths can retry
           resumeInjected.add(sessionId);
         }
-      } catch {
-        // Silent — never break the chat turn
+      } catch (err) {
+        console.warn("resumeInjection failed", err);
       }
     },
   };

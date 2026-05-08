@@ -40,8 +40,8 @@ export class GitHubConnector implements KnowledgeConnector {
     // Try gh CLI first
     try {
       return this.fetchViaCli(repo)
-    } catch {
-      // gh CLI unavailable or not authed — try API
+    } catch (err) {
+      console.warn("fetchViaCli failed", err);
     }
 
     // Try REST API

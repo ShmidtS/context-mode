@@ -4,13 +4,14 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from "zod";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { Buffer } from "node:buffer";
 import { createRequire } from "node:module";
 import {
-  existsSync, readFileSync, writeFileSync, mkdirSync, cpSync, statSync, rmSync, readdirSync, unlinkSync,
+  existsSync, readFileSync, writeFileSync, mkdirSync, cpSync, statSync, rmSync, readdirSync, unlinkSync, realpathSync,
 } from "node:fs";
-import { join, dirname, resolve } from "node:path";
-import { homedir, tmpdir, cpus } from "node:os";
+import { join, dirname, resolve, basename, relative, isAbsolute } from "node:path";
+import { homedir, tmpdir, cpus, platform } from "node:os";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
 import {
   trackResponse,
@@ -83,7 +84,7 @@ function emit(ct, content) {
 
 async function main() {
   const resp = await fetch(url);
-  if (!resp.ok) { console.error("HTTP " + resp.status); process.exit(1); }
+  if (!resp.ok) { throw new Error("HTTP " + resp.status); }
   const contentType = resp.headers.get('content-type') || '';
 
   if (contentType.includes('application/json') || contentType.includes('+json')) {
@@ -133,7 +134,7 @@ async function ssrfGuard(rawUrl: string): Promise<FetchOneResult | null> {
     };
   }
 
-  const strict = process.env.CTX_FETCH_STRICT === "1";
+  const allowPrivate = process.env.CTX_FETCH_ALLOW_PRIVATE === "1";
 
   try {
     const { lookup } = await import("node:dns/promises");
@@ -148,11 +149,11 @@ async function ssrfGuard(rawUrl: string): Promise<FetchOneResult | null> {
           reason: "exit",
         };
       }
-      if (verdict === "private" && strict) {
+      if (verdict === "private" && !allowPrivate) {
         return {
           kind: "fetch_error",
           url: rawUrl,
-          error: `URL "${parsed.hostname}" resolves to private IP ${rec.address} — blocked under CTX_FETCH_STRICT=1`,
+          error: `URL "${parsed.hostname}" resolves to private IP ${rec.address} — blocked by default. Set CTX_FETCH_ALLOW_PRIVATE=1 to allow.`,
           reason: "exit",
         };
       }
@@ -220,7 +221,7 @@ async function fetchOneUrl(url: string, source: string | undefined, force: boole
       reason: "throw",
     };
   } finally {
-    try { rmSync(outputPath); } catch { /* already gone */ }
+    try { rmSync(outputPath); } catch (e) { console.warn("fetchAndIndex rmSync outputPath failed", e) }
   }
 }
 
@@ -494,7 +495,7 @@ export function registerAdminTools(
         const engine = new AnalyticsEngine(createMinimalDb());
         const report = engine.queryAll(sessionStats);
         let lifetime;
-        try { lifetime = getLifetimeStats(); } catch { /* never block ctx_stats */ }
+        try { lifetime = getLifetimeStats(); } catch (e) { console.warn("getLifetimeStats failed", e) }
         text = formatReport(report, VERSION, _latestVersion, lifetime ? { lifetime } : undefined);
       }
 
@@ -562,7 +563,7 @@ export function registerAdminTools(
         } catch (err: unknown) {
           lines.push(`[FAIL] FTS5 / SQLite: FAIL — ${err instanceof Error ? err.message : err}`);
         } finally {
-          try { testDb!?.close(); } catch { /* best effort */ }
+          try { testDb!?.close(); } catch (e) { console.warn("doctor testDb close failed", e) }
         }
       }
 
@@ -671,7 +672,7 @@ export function registerAdminTools(
           resetStore();
           resetVaultStore();
           deleted.push("content store");
-        } catch { /* best effort */ }
+        } catch (e) { console.warn("purgeStore resetStore failed", e) }
       }
 
       // Delete session DB
@@ -681,7 +682,7 @@ export function registerAdminTools(
           rmSync(dbPath);
           deleted.push("session DB");
         }
-      } catch { /* best effort */ }
+      } catch (e) { console.warn("purgeStore deleteSessionDB failed", e) }
 
       // Delete content DB
       try {
@@ -690,16 +691,16 @@ export function registerAdminTools(
           rmSync(contentDbPath);
           deleted.push("content DB");
         }
-      } catch { /* best effort */ }
+      } catch (e) { console.warn("purgeStore deleteContentDB failed", e) }
 
       // Delete session events markdown files
       try {
         const sessionsDir = getSessionDir();
                 const files = readdirSync(sessionsDir).filter(f => f.endsWith("-events.md"));
         for (const file of files) {
-          try { unlinkSync(join(sessionsDir, file)); deleted.push("session events"); } catch {}
+          try { unlinkSync(join(sessionsDir, file)); deleted.push("session events"); } catch (e) { console.warn("purgeStore unlink session event failed", e) }
         }
-      } catch { /* best effort */ }
+      } catch (e) { console.warn("purgeStore deleteSessionEvents failed", e) }
 
       // Reset in-memory stats
       sessionStats.calls = {};
@@ -713,7 +714,7 @@ export function registerAdminTools(
       try {
         const statsFile = getStatsFilePath();
         if (existsSync(statsFile)) unlinkSync(statsFile);
-      } catch { /* best effort */ }
+      } catch (e) { console.warn("purgeStore deleteStatsFile failed", e) }
 
       return trackResponse("ctx_purge", {
         content: [{
@@ -744,14 +745,56 @@ export function registerAdminTools(
       }),
     },
     async ({ port: userPort, sessionDir, contentDir, insightSessionDir, insightContentDir }) => {
-      const port = userPort || 4747;
+      const rawPort = userPort || 4747;
+      if (!Number.isInteger(rawPort) || rawPort < 1 || rawPort > 65535) {
+        return trackResponse("ctx_insight", {
+          content: [{ type: "text" as const, text: `Invalid port: ${rawPort}. Must be an integer 1-65535.` }],
+          isError: true,
+        });
+      }
+      const port: number = rawPort;
       const explicitSessionDir = sessionDir || insightSessionDir;
       const explicitContentDir = contentDir || insightContentDir;
+      // Path traversal guard: user-supplied dirs used as execSync cwd
+      // must stay within homedir() or tmpdir() (MEDIUM fix).
+      const safeRealpathForDirCreate = (p: string): string => {
+        const abs = resolve(p);
+        if (existsSync(abs)) return realpathSync(abs);
+        const parent = dirname(abs);
+        if (!existsSync(parent)) throw new Error(`Parent directory does not exist: ${parent}`);
+        return join(realpathSync(parent), basename(abs));
+      };
+      const canonicalRoot = (p: string): string => {
+        try { return realpathSync(resolve(p)); } catch { return resolve(p); }
+      };
+
+      const isInsideDir = (child: string, parent: string): boolean => {
+        const norm = (p: string) => platform() === "win32" ? p.toLowerCase() : p;
+        const rel = relative(norm(parent), norm(child));
+        return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
+      };
+
+      const validateSafePath = (p: string, label: string): string => {
+        const rp = safeRealpathForDirCreate(p);
+        const home = canonicalRoot(homedir());
+        const tmp = canonicalRoot(tmpdir());
+        if (!isInsideDir(rp, home) && !isInsideDir(rp, tmp)) {
+          throw new McpError(ErrorCode.InvalidRequest, `${label} must be inside home or temp directory: ${p}`);
+        }
+        return rp;
+      };
       const pluginRoot = existsSync(resolve(__pkg_dir, "package.json")) ? __pkg_dir : dirname(__pkg_dir);
       const insightSource = resolve(pluginRoot, "insight");
-      const sessDir = explicitSessionDir ? resolve(explicitSessionDir) : getSessionDir();
-      const insightContentDirResolved = explicitContentDir ? resolve(explicitContentDir) : join(dirname(sessDir), "content");
-      const cacheDir = join(dirname(sessDir), "insight-cache");
+      const sessDir = explicitSessionDir ? validateSafePath(explicitSessionDir, "sessionDir") : getSessionDir();
+      const derivedBase = dirname(sessDir);
+      const insightContentDirResolved = explicitContentDir
+        ? validateSafePath(explicitContentDir, "contentDir")
+        : explicitSessionDir
+          ? validateSafePath(join(derivedBase, "content"), "derived contentDir")
+          : join(derivedBase, "content");
+      const cacheDir = explicitSessionDir
+        ? validateSafePath(join(derivedBase, "insight-cache"), "cacheDir")
+        : join(derivedBase, "insight-cache");
 
       if (!existsSync(join(insightSource, "server.mjs"))) {
         return trackResponse("ctx_insight", {
@@ -806,7 +849,7 @@ export function registerAdminTools(
             req.end();
           });
           portOccupied = true;
-        } catch { /* Port is free */ }
+        } catch (e) { console.warn("insight port check failed", e) }
 
         if (portOccupied && sourceUpdated) {
           steps.push("Killing stale dashboard server (source updated)...");
@@ -817,7 +860,7 @@ export function registerAdminTools(
               execSync(`lsof -ti:${port} | xargs kill 2>/dev/null || true`, { stdio: "pipe" });
             }
             await new Promise(r => setTimeout(r, 500));
-          } catch { /* no process to kill */ }
+          } catch (e) { console.warn("insight kill stale server failed", e) }
           steps.push("Stale server killed.");
         } else if (portOccupied) {
           steps.push("Dashboard already running.");
@@ -826,7 +869,7 @@ export function registerAdminTools(
             if (process.platform === "darwin") execSync(`open "${url}"`, { stdio: "pipe" });
             else if (process.platform === "win32") execSync(`start "" "${url}"`, { stdio: "pipe" });
             else execSync(`xdg-open "${url}" 2>/dev/null || sensible-browser "${url}" 2>/dev/null`, { stdio: "pipe" });
-          } catch { /* browser open is best-effort */ }
+          } catch (e) { console.warn("insight openBrowser failed", e) }
           return trackResponse("ctx_insight", {
             content: [{ type: "text" as const, text: `Dashboard already running at http://localhost:${port}` }],
           });
@@ -835,7 +878,7 @@ export function registerAdminTools(
         // Kill any previous insight child
         const currentChild = _insightChild;
         if (currentChild && currentChild.pid && !currentChild.killed) {
-          try { currentChild.kill("SIGTERM"); } catch { /* best effort */ }
+          try { currentChild.kill("SIGTERM"); } catch (e) { console.warn("insight kill previous child failed", e) }
         }
 
         // Start server
@@ -886,7 +929,7 @@ export function registerAdminTools(
           if (process.platform === "darwin") execSync(`open "${url}"`, { stdio: "pipe" });
           else if (process.platform === "win32") execSync(`start "" "${url}"`, { stdio: "pipe" });
           else execSync(`xdg-open "${url}" 2>/dev/null || sensible-browser "${url}" 2>/dev/null`, { stdio: "pipe" });
-        } catch { /* browser open is best-effort */ }
+        } catch (e) { console.warn("insight openBrowser failed", e) }
 
         steps.push(`Dashboard running at ${url}`);
 

@@ -8,7 +8,7 @@ import { trackResponse } from './shared.js'
 // In-memory connector registry (Phase 1 stub)
 const connectors: Array<{
   connectorId: number
-  type: 'github' | 'notion' | 'slack'
+  type: 'github'
   config: Record<string, unknown>
   lastSyncAt: string | null
 }> = []
@@ -26,10 +26,10 @@ export function registerConnectorTools(
     {
       title: 'Add Connector',
       description:
-        'Register an external connector (GitHub, Notion, Slack) for syncing content into the knowledge graph. ' +
+        'Register an external connector (GitHub) for syncing content into the knowledge graph. ' +
         'After adding, use ctx_connector_sync to pull data.',
       inputSchema: z.object({
-        type: z.enum(['github', 'notion', 'slack'])
+        type: z.enum(['github'])
           .describe('Connector type'),
         config: z.record(z.unknown())
           .describe('Connector configuration (e.g., { repo: "org/repo" } for GitHub)'),
@@ -38,7 +38,7 @@ export function registerConnectorTools(
     async (params) => {
       try {
         const { type, config } = params as {
-          type: 'github' | 'notion' | 'slack'
+          type: 'github'
           config: Record<string, unknown>
         }
 

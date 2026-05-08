@@ -60,8 +60,8 @@ export function getWorktreeSuffix(): string {
       if (mainWorktree && cwd !== mainWorktree) {
         suffix = `__${createHash("sha256").update(cwd).digest("hex").slice(0, 8)}`;
       }
-    } catch {
-      // git not available or not a git repo — no suffix
+    } catch (err) {
+      console.warn("getWorktreeSuffix failed", err);
     }
   }
 
@@ -199,7 +199,7 @@ export class SessionDB extends SQLiteBase {
         // hidden != 0 means generated column — must recreate
         this.db.exec("DROP TABLE session_events");
       }
-    } catch { /* table doesn't exist yet — fine */ }
+    } catch (e) { console.warn("initSchema table_xinfo failed", e) }
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS session_events (
@@ -265,8 +265,8 @@ export class SessionDB extends SQLiteBase {
         this.db.exec("ALTER TABLE session_events ADD COLUMN attribution_confidence REAL NOT NULL DEFAULT 0");
       }
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_session_events_project ON session_events(session_id, project_dir)");
-    } catch {
-      // best-effort migration only
+    } catch (err) {
+      console.warn("session_events failed", err);
     }
 
   }
@@ -778,8 +778,8 @@ export class SessionDB extends SQLiteBase {
     const safeBytes = Number.isFinite(bytesReturned) && bytesReturned > 0 ? Math.round(bytesReturned) : 0;
     try {
       this.stmt(S.incrementToolCall).run(sessionId, tool, safeBytes);
-    } catch {
-      // best-effort: counter must never throw and break the parent call
+    } catch (err) {
+      console.warn("safeBytes failed", err);
     }
   }
 

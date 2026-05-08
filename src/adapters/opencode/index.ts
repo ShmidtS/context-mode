@@ -442,8 +442,8 @@ export class OpenCodeAdapter extends BaseAdapter implements HookAdapter {
       );
       const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
       if (typeof pkg.version === "string") return pkg.version;
-    } catch {
-      /* not found */
+    } catch (err) {
+      console.warn("detectInstalledVersion failed", err);
     }
     return "not installed";
   }

@@ -80,12 +80,12 @@ async function main() {
     executor.cleanupBackgrounded();
     closeStore();
     resetVaultStore();
-    try { unlinkSync(CM_FS_PRELOAD); } catch { /* best effort */ }
+    try { unlinkSync(CM_FS_PRELOAD); } catch (e) { console.warn("unlinkSync preload failed", e) }
     // Remove MCP readiness sentinel (#230)
-    try { unlinkSync(mcpSentinel); } catch { /* best effort */ }
+    try { unlinkSync(mcpSentinel); } catch (e) { console.warn("unlinkSync sentinel failed", e) }
     // Stop ctx_insight dashboard so it does not outlive Claude.
     if (_insightChild && _insightChild.pid && !_insightChild.killed) {
-      try { _insightChild.kill("SIGTERM"); } catch { /* best effort */ }
+      try { _insightChild.kill("SIGTERM"); } catch (e) { console.warn("kill insight child failed", e) }
     }
   };
   const gracefulShutdown = async () => {
@@ -93,7 +93,7 @@ async function main() {
     // bytes_indexed / bytes_returned aren't silently lost on SIGTERM/SIGINT
     try {
       persistStats(true);
-    } catch { /* best effort — never block shutdown */ }
+    } catch (e) { console.warn("persistStats during shutdown failed", e) }
     shutdown();
     process.exit(0);
   };
@@ -108,7 +108,7 @@ async function main() {
   await server.connect(transport);
 
   // Write MCP readiness sentinel (#230)
-  try { writeFileSync(mcpSentinel, String(process.pid)); } catch { /* best effort */ }
+  try { writeFileSync(mcpSentinel, String(process.pid)); } catch (e) { console.warn("writeSentinel failed", e) }
 
   // Detect platform adapter — stored for platform-aware session paths
   try {
@@ -122,7 +122,7 @@ async function main() {
     if (clientInfo) {
       console.error(`MCP client: ${clientInfo.name} v${clientInfo.version} → ${signal.platform}`);
     }
-  } catch { /* best effort — _detectedAdapter stays null, falls back to .claude */ }
+  } catch (e) { console.warn("detectPlatform adapter failed", e) }
 
   // Restore tool-call counters from SessionDB BEFORE the heartbeat fires
   restoreStatsOnStartup();

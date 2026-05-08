@@ -298,8 +298,8 @@ export abstract class CopilotBaseAdapter extends BaseAdapter implements HookAdap
     try {
       const raw = readFileSync(this.getSettingsPath(), "utf-8");
       return JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      /* fall through */
+    } catch (err) {
+      console.warn("readSettings primary failed", err);
     }
     // Fallback: .claude/settings.json
     try {
@@ -370,8 +370,8 @@ export abstract class CopilotBaseAdapter extends BaseAdapter implements HookAdap
         accessSync(scriptPath, constants.R_OK);
         chmodSync(scriptPath, 0o755);
         set.push(scriptPath);
-      } catch {
-        /* skip missing scripts */
+      } catch (err) {
+        console.warn("chmodSync failed", err);
       }
     }
     return set;

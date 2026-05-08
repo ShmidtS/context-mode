@@ -18,9 +18,11 @@
  */
 
 import { createHash } from "node:crypto";
-import { join } from "node:path";
-import { accessSync, copyFileSync, constants, mkdirSync } from "node:fs";
+import { join, resolve, dirname } from "node:path";
+import { accessSync, copyFileSync, constants, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+import type { DiagnosticResult } from "./types.js";
 
 export abstract class BaseAdapter {
   constructor(protected readonly sessionDirSegments: string[]) {}
@@ -87,6 +89,101 @@ export abstract class BaseAdapter {
       return backupPath;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Default: read JSON from getSettingsPath(). Identical in 6+ adapters.
+   * Override for multi-path search (cursor, openclaw, opencode),
+   * TOML format (codex), or fallback paths (copilot-base).
+   */
+  readSettings(): Record<string, unknown> | null {
+    try {
+      const raw = readFileSync(this.getSettingsPath(), "utf-8");
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Default: mkdirSync dirname + writeFileSync JSON.
+   * Override for: copilot-base (different dir), qwen-code (require-based),
+   * codex (TOML no-op), cursor (project dir mkdir), gemini-cli (homedir mkdir).
+   */
+  writeSettings(settings: Record<string, unknown>): void {
+    const settingsPath = this.getSettingsPath();
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+  }
+
+  /**
+   * Read version from <baseDir>/extensions/context-mode/package.json.
+   * Shared by: antigravity, kiro, gemini-cli.
+   * Returns "not installed" on failure.
+   */
+  protected readVersionFromExtensionCache(baseSegments: string[]): string {
+    try {
+      const pkgPath = resolve(homedir(), ...baseSegments, "extensions", "context-mode", "package.json");
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      return pkg.version ?? "unknown";
+    } catch {
+      return "not installed";
+    }
+  }
+
+  /**
+   * Read a routing instructions file from configs/<platformName>/<fileName>.
+   * Shared by: antigravity, zed, codex, kiro.
+   * Returns fallback inline instructions on failure.
+   */
+  protected readRoutingInstructionsFile(platformName: string, fileName: string, fallbackTools: string): string {
+    const instructionsPath = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "configs",
+      platformName,
+      fileName,
+    );
+    try {
+      return readFileSync(instructionsPath, "utf-8");
+    } catch {
+      return `# context-mode\n\nUse context-mode MCP tools (${fallbackTools}) instead of bash/cat/curl for data-heavy operations.`;
+    }
+  }
+
+  /**
+   * Check for context-mode in mcpServers section of a JSON config file.
+   * Shared by: antigravity, kiro.
+   * Returns a DiagnosticResult with pass/fail/warn.
+   */
+  protected checkMcpServersRegistration(configLabel: string): DiagnosticResult {
+    try {
+      const raw = readFileSync(this.getSettingsPath(), "utf-8");
+      const config = JSON.parse(raw);
+      const mcpServers = config?.mcpServers ?? {};
+
+      if ("context-mode" in mcpServers) {
+        return {
+          check: "MCP registration",
+          status: "pass",
+          message: "context-mode found in mcpServers config",
+        };
+      }
+
+      return {
+        check: "MCP registration",
+        status: "fail",
+        message: "context-mode not found in mcpServers",
+        fix: `Add context-mode to mcpServers in ${configLabel}`,
+      };
+    } catch {
+      return {
+        check: "MCP registration",
+        status: "warn",
+        message: `Could not read ${configLabel}`,
+      };
     }
   }
 

@@ -124,15 +124,6 @@ export class QwenCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdapte
 
   // ── Settings read/write ────────────────────────────────
 
-  readSettings(): Record<string, unknown> | null {
-    try {
-      const raw = readFileSync(this.getSettingsPath(), "utf-8");
-      return JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }
-
   writeSettings(settings: Record<string, unknown>): void {
     const { writeFileSync } = require("node:fs");
     writeFileSync(this.getSettingsPath(), JSON.stringify(settings, null, 2));

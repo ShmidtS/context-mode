@@ -61,6 +61,51 @@ type FMKRow = {
 };
 
 // ─────────────────────────────────────────────────────────
+// Security helpers
+// ─────────────────────────────────────────────────────────
+
+/** Reject identifiers that are not purely alphanumeric + underscore. */
+function assertSafeIdentifier(name: string, kind: string): void {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+    throw new Error(`Unsafe ${kind} identifier: "${name}" — only alphanumeric and underscore allowed`);
+  }
+}
+
+/** Allowed column definitions for migration (whitelist). */
+const ALLOWED_DEFINITIONS: ReadonlySet<string> = new Set([
+  "TEXT NOT NULL DEFAULT 'vault'",
+  "TEXT",
+  "INTEGER NOT NULL DEFAULT 0",
+  "INTEGER",
+  "REAL NOT NULL DEFAULT 0",
+  "REAL",
+  "TEXT NOT NULL DEFAULT ''",
+]);
+
+/** Reject SQL containing dangerous statements. */
+function assertSafeSql(sql: string): void {
+  // Block destructive DDL
+  if (/\bDROP\s+(TABLE|INDEX|VIEW|TRIGGER)\b/i.test(sql)) {
+    throw new Error("Unsafe SQL: DROP statements are not allowed via exec/prepare");
+  }
+  if (/\bTRUNCATE\b/i.test(sql)) {
+    throw new Error("Unsafe SQL: TRUNCATE is not allowed via exec/prepare");
+  }
+  // Block ALTER outside internal addColumnIfMissing (use dedicated method)
+  if (/\bALTER\s+TABLE\b/i.test(sql)) {
+    throw new Error("Unsafe SQL: ALTER TABLE is not allowed via exec/prepare; use addColumnIfMissing");
+  }
+  // DELETE must have WHERE clause
+  if (/\bDELETE\s+FROM\b/i.test(sql) && !/\bWHERE\b/i.test(sql)) {
+    throw new Error("Unsafe SQL: DELETE without WHERE is not allowed");
+  }
+  // UPDATE must have WHERE clause
+  if (/\bUPDATE\s+\w+\s+SET\b/i.test(sql) && !/\bWHERE\b/i.test(sql)) {
+    throw new Error("Unsafe SQL: UPDATE without WHERE is not allowed");
+  }
+}
+
+// ─────────────────────────────────────────────────────────
 // VaultGraphStore
 // ─────────────────────────────────────────────────────────
 
@@ -176,10 +221,15 @@ export class VaultGraphStore {
 
   /** Add a column to a table if it does not already exist. O(1) in SQLite. */
   #addColumnIfMissing(table: string, column: string, definition: string): void {
+    assertSafeIdentifier(table, 'table');
+    assertSafeIdentifier(column, 'column');
+    if (!ALLOWED_DEFINITIONS.has(definition)) {
+      throw new Error(`Unsafe column definition: "${definition}" — not in whitelist`);
+    }
     try {
       this.#db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
-    } catch {
-      // Column already exists — safe to ignore
+    } catch (err) {
+      console.warn("Error failed", err);
     }
   }
 
@@ -499,13 +549,15 @@ export class VaultGraphStore {
 
   // ── Auxiliary table support (for analysis modules) ──
 
-  /** Execute raw SQL (for schema creation of auxiliary tables). */
+  /** Execute SQL with safety validation (for schema creation of auxiliary tables). */
   exec(sql: string): void {
+    assertSafeSql(sql);
     this.#db.exec(sql);
   }
 
-  /** Prepare a raw SQL statement (for auxiliary table operations). */
+  /** Prepare a SQL statement with safety validation (for auxiliary table operations). */
   prepare(sql: string): PreparedStatement {
+    assertSafeSql(sql);
     return this.#db.prepare(sql) as PreparedStatement;
   }
 
