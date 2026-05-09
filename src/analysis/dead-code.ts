@@ -9,6 +9,8 @@
  * Also flags zero-in-degree nodes that aren't entry points.
  */
 
+import { readFileSync } from 'node:fs'
+import { join, basename } from 'node:path'
 import type { VaultGraphStore } from '../vault/graph-store.js'
 import type { VaultNode } from '../types.js'
 
@@ -22,23 +24,119 @@ export interface DeadCodeResult {
   entryPath?: string
 }
 
-/** Conventional entry point file basenames for auto-detection. */
-const ENTRY_PATTERNS = [
-  /^index\.ts$/,
-  /^index\.js$/,
-  /^main\.ts$/,
-  /^main\.js$/,
-  /^cli\.ts$/,
-  /^cli\.js$/,
-  /^server\.ts$/,
-  /^server\.js$/,
-  /^app\.ts$/,
-  /^app\.js$/,
-  /^mod\.ts$/,
-]
+/** Conventional entry point file stems for auto-detection (language-agnostic). */
+const ENTRY_STEMS = new Set([
+  'index',
+  'main',
+  'cli',
+  'server',
+  'app',
+  'mod',
+  '__main__',
+])
+
+/** Non-code extensions to ignore when matching entry points. */
+const NON_CODE_EXTS = new Set([
+  'md',
+  'txt',
+  'json',
+  'yaml',
+  'yml',
+  'html',
+  'css',
+  'scss',
+  'sass',
+  'svg',
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'ico',
+  'woff',
+  'woff2',
+  'ttf',
+  'eot',
+])
 
 /** Edge types that establish reachability. */
 const REACHABLE_EDGES = new Set(['import', 'calls', 'inherits', 'implements'])
+
+// ─────────────────────────────────────────────────────────
+// Package.json entry-point detection
+// ─────────────────────────────────────────────────────────
+
+/** Extract likely source entry points from package.json main/exports/bin/types. */
+function detectPackageJsonEntryPoints(vaultPath: string): string[] {
+  const entryPaths: string[] = []
+  try {
+    const raw = readFileSync(join(vaultPath, 'package.json'), 'utf-8')
+    const pkg = JSON.parse(raw) as Record<string, unknown>
+
+    const add = (p: unknown) => {
+      if (!p || typeof p !== 'string') return
+      let mapped = p
+      // Strip leading ./ for consistency with vault paths
+      if (mapped.startsWith('./')) mapped = mapped.slice(2)
+      // Map common build outputs back to source
+      if (mapped.startsWith('build/')) mapped = 'src/' + mapped.slice(6)
+      // Extension flip: compiled JS → TS source
+      const extMap: Record<string, string> = {
+        '.js': '.ts',
+        '.mjs': '.ts',
+        '.cjs': '.ts',
+        '.jsx': '.tsx',
+      }
+      for (const [from, to] of Object.entries(extMap)) {
+        if (mapped.endsWith(from)) {
+          mapped = mapped.slice(0, -from.length) + to
+          break
+        }
+      }
+      entryPaths.push(mapped)
+    }
+
+    if (pkg.main) add(pkg.main)
+    if (pkg.module) add(pkg.module)
+    if (pkg.types) add(pkg.types)
+    if (pkg.bin && typeof pkg.bin === 'object') {
+      for (const v of Object.values(pkg.bin)) add(v)
+    }
+    if (pkg.exports && typeof pkg.exports === 'object') {
+      const walk = (obj: unknown) => {
+        if (typeof obj === 'string') { add(obj); return }
+        if (Array.isArray(obj)) { obj.forEach(walk); return }
+        if (obj && typeof obj === 'object') { Object.values(obj).forEach(walk) }
+      }
+      walk(pkg.exports)
+    }
+
+    // Custom plugin/extension fields (e.g. pi.extensions, openclaw.extensions)
+    for (const field of ['pi', 'openclaw'] as const) {
+      const obj = pkg[field] as Record<string, unknown> | undefined
+      if (obj && typeof obj === 'object' && Array.isArray(obj.extensions)) {
+        for (const p of obj.extensions) add(p)
+      }
+    }
+
+    // Respect tsconfig outDir/rootDir mapping if present
+    try {
+      const tsRaw = readFileSync(join(vaultPath, 'tsconfig.json'), 'utf-8')
+      const tsconfig = JSON.parse(tsRaw) as Record<string, unknown>
+      const compilerOptions = tsconfig.compilerOptions as Record<string, unknown> | undefined
+      if (compilerOptions?.outDir && compilerOptions?.rootDir) {
+        const outDir = String(compilerOptions.outDir).replace(/^\.\//, '').replace(/\/$/, '')
+        const rootDir = String(compilerOptions.rootDir).replace(/^\.\//, '').replace(/\/$/, '')
+        for (let i = 0; i < entryPaths.length; i++) {
+          if (entryPaths[i].startsWith(outDir + '/')) {
+            entryPaths[i] = rootDir + '/' + entryPaths[i].slice(outDir.length + 1)
+          }
+        }
+      }
+    } catch { /* ignore missing tsconfig */ }
+  } catch { /* ignore missing package.json */ }
+
+  return entryPaths
+}
 
 // ─────────────────────────────────────────────────────────
 // DeadCodeAnalyzer
@@ -196,24 +294,37 @@ export class DeadCodeAnalyzer {
 
   // ── Private helpers ──
 
-  /** Auto-detect entry points from conventional file names and export default patterns. */
+  /** Auto-detect entry points from conventional file names and package.json. */
   #autoDetectEntryPoints(
     vaultPath: string,
     entryNodeIds: Set<number>,
     entryPaths: Set<string>,
   ): void {
     const nodes = this.#getVaultNodes(vaultPath)
+
+    // Package.json-derived entry point basenames
+    const pkgEntryBasenames = new Set(
+      detectPackageJsonEntryPoints(vaultPath).map((p) => basename(p).replace(/\\/g, '/')),
+    )
+
     for (const node of nodes) {
-      const basename = node.note_path.split('/').pop() ?? ''
-      if (ENTRY_PATTERNS.some((p) => p.test(basename))) {
+      const base = basename(node.note_path.replace(/\\/g, '/'))
+      const dotIndex = base.lastIndexOf('.')
+      const stem = dotIndex > 0 ? base.slice(0, dotIndex) : base
+      const ext = dotIndex > 0 ? base.slice(dotIndex + 1).toLowerCase() : ''
+
+      // Conventional entry point file names (language-agnostic)
+      if (ENTRY_STEMS.has(stem) && !NON_CODE_EXTS.has(ext)) {
         entryNodeIds.add(node.id)
         entryPaths.add(node.note_path)
         continue
       }
-      // Check for export default in node title or context
-      if (node.title.includes('export default') || node.note_path.includes('index.')) {
+
+      // Entry points declared in package.json (main/exports/bin/types)
+      if (pkgEntryBasenames.has(base)) {
         entryNodeIds.add(node.id)
         entryPaths.add(node.note_path)
+        continue
       }
     }
   }
