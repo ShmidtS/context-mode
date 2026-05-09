@@ -249,12 +249,19 @@ function getPluginRoot(): string {
 }
 
 function getLocalVersion(): string {
-  try {
-    const pkg = JSON.parse(readFileSync(resolve(getPluginRoot(), "package.json"), "utf-8"));
-    return pkg.version ?? "unknown";
-  } catch {
-    return "unknown";
+  const pluginRoot = getPluginRoot();
+  const candidates = [
+    resolve(pluginRoot, "package.json"),
+    resolve(pluginRoot, ".claude-plugin", "plugin.json"),
+    resolve(pluginRoot, ".claude-plugin", "marketplace.json"),
+  ];
+  for (const path of candidates) {
+    try {
+      const pkg = JSON.parse(readFileSync(path, "utf-8"));
+      if (pkg.version) return pkg.version;
+    } catch { /* continue */ }
   }
+  return "unknown";
 }
 
 async function fetchLatestVersion(): Promise<string> {
@@ -263,7 +270,7 @@ async function fetchLatestVersion(): Promise<string> {
   // racing with process.exit() teardown on Node.js v24+.
   return new Promise((resolve) => {
     const req = httpsRequest(
-      "https://registry.npmjs.org/context-mode/latest",
+      "https://raw.githubusercontent.com/ShmidtS/context-mode/main/package.json",
       { headers: { Connection: "close" } },
       (res) => {
         let raw = "";
@@ -517,16 +524,16 @@ async function doctorCheckVersions(adapter: HookAdapter): Promise<void> {
 
   if (latestVersion === "unknown") {
     p.log.warn(
-      color.yellow("npm (MCP): WARN") +
-        ` — local v${localVersion}, could not reach npm registry`,
+      color.yellow("remote: WARN") +
+        ` — local v${localVersion}, could not reach GitHub`,
     );
   } else if (localVersion === latestVersion) {
     p.log.success(
-      color.green("npm (MCP): PASS") + ` — v${localVersion}`,
+      color.green("remote: PASS") + ` — v${localVersion}`,
     );
   } else {
     p.log.warn(
-      color.yellow("npm (MCP): WARN") +
+      color.yellow("remote: WARN") +
         ` — local v${localVersion}, latest v${latestVersion}` +
         color.dim("\n  Run: /context-mode:ctx-upgrade"),
     );
@@ -550,7 +557,7 @@ async function doctorCheckVersions(adapter: HookAdapter): Promise<void> {
   } else {
     p.log.info(
       `${adapter.name}: v${installedVersion}` +
-        color.dim(" — could not verify against npm registry"),
+        color.dim(" — could not verify against GitHub"),
     );
   }
 }
@@ -754,6 +761,27 @@ async function upgradeSyncMarketplace(
     "context-mode",
   );
   if (!existsSync(join(marketplaceDir, ".git"))) return;
+
+  const EXPECTED_REPO = "ShmidtS/context-mode";
+
+  // Verify remote points to the correct repository
+  try {
+    const currentUrl = execFileSync(
+      "git",
+      ["-C", marketplaceDir, "remote", "get-url", "origin"],
+      { stdio: "pipe", encoding: "utf-8", timeout: 5000 },
+    ).trim();
+    if (!currentUrl.includes(EXPECTED_REPO)) {
+      s.start("Updating marketplace remote");
+      execFileSync(
+        "git",
+        ["-C", marketplaceDir, "remote", "set-url", "origin", `https://github.com/${EXPECTED_REPO}.git`],
+        { stdio: "pipe", timeout: 10000 },
+      );
+      s.stop(color.green("Marketplace remote updated"));
+      changes.push("Marketplace remote switched to " + EXPECTED_REPO);
+    }
+  } catch { /* ignore if no remote or git fails */ }
 
   s.start("Syncing marketplace clone");
   try {

@@ -312,7 +312,7 @@ const VERSION_SILENT_MS = 60 * 60 * 1000; // 1 hour
 async function fetchLatestVersion(): Promise<string> {
   return new Promise((res) => {
     const req = httpsRequest(
-      "https://registry.npmjs.org/context-mode/latest",
+      "https://raw.githubusercontent.com/ShmidtS/context-mode/main/package.json",
       { headers: { Connection: "close" } },
       (resp) => {
         let raw = "";
@@ -336,7 +336,7 @@ function getUpgradeHint(): string {
   if (name === "Claude Code") return "/ctx-upgrade";
   if (name === "OpenClaw") return "npm run install:openclaw";
   if (name === "Pi") return "npm run build";
-  return "npm update -g context-mode";
+  return "context-mode upgrade";
 }
 
 function isOutdated(): boolean {

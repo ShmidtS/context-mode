@@ -1925,9 +1925,9 @@ describe("Version outdated warning in trackResponse", () => {
     "utf-8",
   );
 
-  test("fetchLatestVersion function exists and uses npm registry", async () => {
+  test("fetchLatestVersion function exists and uses GitHub repository", async () => {
     expect(serverSrc).toContain("function fetchLatestVersion");
-    expect(serverSrc).toContain("registry.npmjs.org/context-mode");
+    expect(serverSrc).toContain("raw.githubusercontent.com/ShmidtS/context-mode/main/package.json");
   });
 
   test("version check fires in main() after server.connect", async () => {
@@ -1958,8 +1958,8 @@ describe("Version outdated warning in trackResponse", () => {
     expect(serverSrc).toContain("function getUpgradeHint");
     // Claude Code gets slash command
     expect(serverSrc).toMatch(/claude.code.*ctx.upgrade|ctx.upgrade.*claude.code/i);
-    // npm platforms get npm update
-    expect(serverSrc).toContain("npm update -g context-mode");
+    // Default fallback uses CLI upgrade
+    expect(serverSrc).toContain("context-mode upgrade");
     // OpenClaw gets its own command
     expect(serverSrc).toContain("npm run install:openclaw");
   });

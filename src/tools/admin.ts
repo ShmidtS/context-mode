@@ -615,7 +615,7 @@ export function registerAdminTools(
       } else if (adapter?.name === "OpenClaw") {
         cmd = "npm run install:openclaw";
       } else {
-        cmd = "npm update -g context-mode";
+        cmd = "context-mode upgrade";
       }
 
       const text = [

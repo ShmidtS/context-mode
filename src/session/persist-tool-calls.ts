@@ -5,7 +5,7 @@
  * Why this module exists
  * ──────────────────────
  * Commit 4742160 (May 2 16:58) added the SessionDB write path so the
- * statusline counters survived `npm update -g context-mode` and
+ * statusline counters survived `context-mode upgrade` and
  * `claude --continue`. Commit b392c2f (May 2 21:43) — the concurrency
  * refactor — silently dropped that wiring as collateral. Same-session
  * `/ctx-upgrade` flips the statusline back to `0 calls / $0.00`
