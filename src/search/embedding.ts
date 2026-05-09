@@ -2,8 +2,7 @@
  * Embedding provider abstraction for semantic search.
  *
  * Defines the EmbeddingProvider interface and ships an Ollama-based
- * implementation that calls the /api/embeddings endpoint. An ONNX
- * stub is provided for future local-inference support.
+ * implementation that calls the /api/embeddings endpoint.
  */
 
 const DEBUG = process.env.DEBUG?.includes('context-mode')
@@ -72,29 +71,11 @@ export class OllamaProvider implements EmbeddingProvider {
 }
 
 // ─────────────────────────────────────────────────────────
-// ONNX provider (stub)
-// ─────────────────────────────────────────────────────────
-
-export class ONNXProvider implements EmbeddingProvider {
-  readonly name: string
-  readonly dimensions: number
-
-  constructor(_modelPath: string) {
-    this.name = 'onnx-local'
-    this.dimensions = 0
-  }
-
-  async embed(_text: string): Promise<Float32Array | null> {
-    throw new Error('ONNX provider not yet implemented')
-  }
-}
-
-// ─────────────────────────────────────────────────────────
 // Factory
 // ─────────────────────────────────────────────────────────
 
 export function createEmbeddingProvider(
-  type: 'ollama' | 'onnx',
+  type: 'ollama',
   config?: Record<string, unknown>,
 ): EmbeddingProvider | null {
   if (type === 'ollama') {
@@ -104,10 +85,6 @@ export function createEmbeddingProvider(
       (config?.dimensions as number) ?? undefined,
       (config?.apiKey as string) ?? undefined,
     )
-  }
-  if (type === 'onnx') {
-    if (!config?.modelPath) return null
-    return new ONNXProvider(config.modelPath as string)
   }
   return null
 }

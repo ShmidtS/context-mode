@@ -11,6 +11,7 @@ package-lock.json
 hooks/session-extract.bundle.mjs
 hooks/session-snapshot.bundle.mjs
 hooks/session-db.bundle.mjs
+hooks/session-attribution.bundle.mjs
 gh-cli-cache/
 tasks/
 .playwright-mcp/

@@ -64,7 +64,7 @@ interface BeforeHookInput {
 
 /** OpenCode tool.execute.before — second parameter */
 interface BeforeHookOutput {
-  args: any;
+  args: Record<string, unknown>;
 }
 
 /** OpenCode tool.execute.after — first parameter */
@@ -72,14 +72,14 @@ interface AfterHookInput {
   tool: string;
   sessionID: string;
   callID: string;
-  args: any;
+  args: Record<string, unknown>;
 }
 
 /** OpenCode tool.execute.after — second parameter */
 interface AfterHookOutput {
   title: string;
   output: string;
-  metadata: any;
+  metadata: unknown;
 }
 
 /** OpenCode experimental.session.compacting — first parameter */

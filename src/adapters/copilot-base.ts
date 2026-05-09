@@ -65,12 +65,14 @@ export interface CopilotHookInput {
 // Hook module interface — each platform re-exports from its hooks.ts
 // ─────────────────────────────────────────────────────────
 
+export type CopilotHookType = "PreToolUse" | "PostToolUse" | "PreCompact" | "SessionStart";
+
 export interface CopilotHookModule {
   HOOK_TYPES: {
-    readonly PRE_TOOL_USE: string;
-    readonly POST_TOOL_USE: string;
-    readonly PRE_COMPACT: string;
-    readonly SESSION_START: string;
+    readonly PRE_TOOL_USE: "PreToolUse";
+    readonly POST_TOOL_USE: "PostToolUse";
+    readonly PRE_COMPACT: "PreCompact";
+    readonly SESSION_START: "SessionStart";
     // Optional — vscode-copilot dropped these (no scripts present, samples
     // confirm not blocking). Other Copilot platforms (e.g. jetbrains) may
     // still surface them as orphan declarations until their script set lands.
@@ -79,8 +81,7 @@ export interface CopilotHookModule {
     readonly SUBAGENT_STOP?: string;
   };
   HOOK_SCRIPTS: Record<string, string>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  buildHookCommand: (hookType: any, pluginRoot?: string) => string;
+  buildHookCommand: (hookType: CopilotHookType, pluginRoot?: string) => string;
 }
 
 // ─────────────────────────────────────────────────────────

@@ -229,7 +229,7 @@ export class VaultGraphStore {
     try {
       this.#db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
     } catch (err) {
-      console.warn("Error failed", err);
+      console.warn(`addColumnIfMissing(${table}.${column}) failed`, err)
     }
   }
 
