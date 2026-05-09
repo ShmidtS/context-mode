@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execSync } from "node:child_process";
-import { existsSync, chmodSync, readFileSync, writeFileSync, readdirSync, symlinkSync, mkdirSync, lstatSync, unlinkSync } from "node:fs";
+import { existsSync, chmodSync, readFileSync, writeFileSync, readdirSync, symlinkSync, mkdirSync, lstatSync, unlinkSync, rmSync } from "node:fs";
 import { dirname, resolve, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -227,8 +227,8 @@ if (!process.env.VITEST) {
 // Ensure native dependencies + ABI compatibility (shared with hooks via ensure-deps.mjs)
 // ensure-deps handles better-sqlite3 install + ABI cache/rebuild automatically (#148, #203)
 import "./hooks/ensure-deps.mjs";
-// Also install pure-JS deps used by server
-for (const pkg of ["turndown", "turndown-plugin-gfm", "@mixmark-io/domino"]) {
+// Also install pure-JS deps used by server (and optional tree-sitter externals)
+for (const pkg of ["turndown", "turndown-plugin-gfm", "@mixmark-io/domino", "tree-sitter", "tree-sitter-typescript"]) {
   if (!existsSync(resolve(__dirname, "node_modules", pkg))) {
     try {
       execSync(`npm install ${pkg} --no-package-lock --no-save --silent`, {
@@ -238,6 +238,23 @@ for (const pkg of ["turndown", "turndown-plugin-gfm", "@mixmark-io/domino"]) {
       });
     } catch { /* best effort */ }
   }
+}
+
+// ── Self-heal: detect corrupted node_modules where npm reports "up to date"
+// but actual .js files are missing (interrupted install, AV quarantine, etc.)
+function nodeModulesCorrupted() {
+  const checks = [
+    ["node_modules", "@modelcontextprotocol", "sdk", "dist", "esm", "server", "mcp.js"],
+    ["node_modules", "zod", "package.json"],
+    ["node_modules", "esbuild", "package.json"],
+    ["node_modules", "typescript", "package.json"],
+    ["node_modules", "turndown", "package.json"],
+    ["node_modules", "@mixmark-io", "domino", "package.json"],
+  ];
+  for (const segments of checks) {
+    if (!existsSync(resolve(__dirname, ...segments))) return true;
+  }
+  return false;
 }
 
 // Self-heal: create CLI shim if cli.bundle.mjs is missing (marketplace installs)
@@ -260,7 +277,13 @@ async function tryBundle() {
 }
 
 async function doBuild() {
-  if (!existsSync(resolve(__dirname, "node_modules"))) {
+  const nm = resolve(__dirname, "node_modules");
+  if (existsSync(nm) && nodeModulesCorrupted()) {
+    try {
+      rmSync(nm, { recursive: true, force: true });
+    } catch { /* best effort */ }
+  }
+  if (!existsSync(nm)) {
     try {
       execSync("npm install --silent", { cwd: __dirname, stdio: "pipe", timeout: 120000 });
     } catch { /* best effort */ }
