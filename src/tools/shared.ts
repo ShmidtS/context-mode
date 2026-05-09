@@ -24,16 +24,28 @@ import { type HookAdapter } from "../adapters/types.js";
 // ── Package metadata ──────────────────────────────────────
 
 import { fileURLToPath } from "node:url";
-const __pkg_dir = dirname(fileURLToPath(import.meta.url));
+function findPackageRoot(startDir: string): string {
+  let dir = startDir;
+  while (dir !== dirname(dir)) {
+    const pkgPath = resolve(dir, "package.json");
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+        if (pkg.name === "context-mode") return dir;
+      } catch { /* continue */ }
+    }
+    dir = dirname(dir);
+  }
+  return startDir;
+}
+const __pkg_dir = findPackageRoot(dirname(fileURLToPath(import.meta.url)));
 // Re-export for tools that need it
 export { __pkg_dir };
 
 export const VERSION: string = (() => {
-  for (const rel of ["../package.json", "./package.json"]) {
-    const p = resolve(__pkg_dir, rel);
-    if (existsSync(p)) {
-      try { return JSON.parse(readFileSync(p, "utf8")).version; } catch (e) { console.warn("VERSION read failed", e) }
-    }
+  const p = resolve(__pkg_dir, "package.json");
+  if (existsSync(p)) {
+    try { return JSON.parse(readFileSync(p, "utf8")).version; } catch (e) { console.warn("VERSION read failed", e) }
   }
   return "unknown";
 })();
