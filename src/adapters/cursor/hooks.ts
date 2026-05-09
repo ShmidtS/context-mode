@@ -6,6 +6,8 @@
  * than a `{ matcher, hooks: [...] }` wrapper.
  */
 
+import { createBuildHookCommand, createIsContextModeHook } from "../hooks-helpers.js";
+
 /** Cursor hook type names. */
 export const HOOK_TYPES = {
   PRE_TOOL_USE: "preToolUse",
@@ -67,29 +69,18 @@ export interface CursorHookCommandEntry {
   failClosed?: boolean;
 }
 
+const buildHookCommandForPlatform = createBuildHookCommand<HookType>(
+  HOOK_SCRIPTS,
+  "cursor",
+);
+
 /** Check whether a native Cursor hook entry points to context-mode. */
-export function isContextModeHook(
-  entry: CursorHookCommandEntry | { hooks?: Array<{ command?: string }> },
-  hookType: HookType,
-): boolean {
-  const scriptName = HOOK_SCRIPTS[hookType];
-  const cliCommand = buildHookCommand(hookType);
-
-  if ("command" in entry) {
-    const cmd = entry.command ?? "";
-    return (scriptName != null && cmd.includes(scriptName)) || cmd.includes(cliCommand);
-  }
-
-  const wrappedEntry = entry as { hooks?: Array<{ command?: string }> };
-  return (
-    wrappedEntry.hooks?.some((hook: { command?: string }) => {
-      const cmd = hook.command ?? "";
-      return (scriptName != null && cmd.includes(scriptName)) || cmd.includes(cliCommand);
-    }) ?? false
-  );
-}
+export const isContextModeHook = createIsContextModeHook<HookType>(
+  HOOK_SCRIPTS,
+  (hookType) => buildHookCommandForPlatform(hookType),
+);
 
 /** Build the CLI dispatcher command for a Cursor hook type. */
 export function buildHookCommand(hookType: HookType): string {
-  return `context-mode hook cursor ${hookType.toLowerCase()}`;
+  return buildHookCommandForPlatform(hookType);
 }

@@ -183,44 +183,44 @@ export class VSCodeCopilotAdapter extends CopilotBaseAdapter {
     return results;
   }
 
-  checkPluginRegistration(): DiagnosticResult {
-    // Check MCP config in .vscode/mcp.json
-    try {
-      const mcpConfigPath = resolve(".vscode", "mcp.json");
-      const raw = readFileSync(mcpConfigPath, "utf-8");
-      const config = JSON.parse(raw) as Record<string, unknown>;
-
-      const servers = config.servers as Record<string, unknown> | undefined;
-      if (servers) {
-        const hasPlugin = Object.keys(servers).some((k) =>
-          k.includes("context-mode"),
-        );
-        if (hasPlugin) {
-          return {
-            check: "MCP registration",
-            status: "pass",
-            message: "context-mode found in .vscode/mcp.json",
-          };
-        }
-      }
-
-      return {
-        check: "MCP registration",
-        status: "fail",
-        message: "context-mode not found in .vscode/mcp.json",
-        fix: "Add context-mode server to .vscode/mcp.json",
-      };
-    } catch {
-      return {
-        check: "MCP registration",
-        status: "warn",
-        message: "Could not read .vscode/mcp.json",
-      };
-    }
+  protected getPluginRegistrationSettingsPaths(): string[] {
+    return [resolve(".vscode", "mcp.json")];
   }
 
-  getInstalledVersion(): string {
-    // Check VS Code extensions for context-mode
+  protected findPluginEntry(settings: Record<string, unknown>): DiagnosticResult | null {
+    const servers = settings.servers as Record<string, unknown> | undefined;
+    if (!servers) return null;
+
+    const hasPlugin = Object.keys(servers).some((k) =>
+      k.includes("context-mode"),
+    );
+    if (!hasPlugin) return null;
+
+    return {
+      check: "MCP registration",
+      status: "pass",
+      message: "context-mode found in .vscode/mcp.json",
+    };
+  }
+
+  protected getSettingsReadFailureDiagnostic(): DiagnosticResult {
+    return {
+      check: "MCP registration",
+      status: "warn",
+      message: "Could not read .vscode/mcp.json",
+    };
+  }
+
+  protected getPluginRegistrationNotFoundDiagnostic(): DiagnosticResult {
+    return {
+      check: "MCP registration",
+      status: "fail",
+      message: "context-mode not found in .vscode/mcp.json",
+      fix: "Add context-mode server to .vscode/mcp.json",
+    };
+  }
+
+  protected readVersionSettings(): Record<string, unknown> | null {
     const extensionDirs = [
       join(homedir(), ".vscode", "extensions"),
       join(homedir(), ".vscode-insiders", "extensions"),
@@ -232,8 +232,8 @@ export class VSCodeCopilotAdapter extends CopilotBaseAdapter {
           join(extDir, "extensions.json"),
           "utf-8",
         );
-        const exts = JSON.parse(entries) as Array<Record<string, unknown>>;
-        const contextMode = exts.find(
+        const extensions = JSON.parse(entries) as Array<Record<string, unknown>>;
+        const contextMode = extensions.find(
           (e) =>
             typeof e.identifier === "object" &&
             e.identifier !== null &&
@@ -242,11 +242,27 @@ export class VSCodeCopilotAdapter extends CopilotBaseAdapter {
             ).id?.toString().includes("context-mode"),
         );
         if (contextMode && typeof contextMode.version === "string") {
-          return contextMode.version;
+          return { extensions };
         }
       } catch {
         continue;
       }
+    }
+    return null;
+  }
+
+  protected extractVersion(settings: Record<string, unknown>): string {
+    const exts = settings.extensions as Array<Record<string, unknown>> | undefined;
+    const contextMode = exts?.find(
+      (e) =>
+        typeof e.identifier === "object" &&
+        e.identifier !== null &&
+        (
+          e.identifier as Record<string, unknown>
+        ).id?.toString().includes("context-mode"),
+    );
+    if (contextMode && typeof contextMode.version === "string") {
+      return contextMode.version;
     }
     return "not installed";
   }

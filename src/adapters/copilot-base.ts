@@ -123,12 +123,6 @@ export abstract class CopilotBaseAdapter extends BaseAdapter implements HookAdap
   /** Validate that hooks are properly configured for this platform. */
   abstract validateHooks(pluginRoot: string): DiagnosticResult[];
 
-  /** Check if the plugin is registered/enabled on this platform. */
-  abstract checkPluginRegistration(): DiagnosticResult;
-
-  /** Get the installed version from this platform's registry/marketplace. */
-  abstract getInstalledVersion(): string;
-
   // ── Input parsing (shared) ─────────────────────────────
 
   parsePreToolUseInput(raw: unknown): PreToolUseEvent {

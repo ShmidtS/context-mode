@@ -94,16 +94,90 @@ export abstract class BaseAdapter {
 
   /**
    * Default: read JSON from getSettingsPath(). Identical in 6+ adapters.
-   * Override for multi-path search (cursor, openclaw, opencode),
-   * TOML format (codex), or fallback paths (copilot-base).
+   * Override getSettingsPaths() for multi-path search and parseSettings()
+   * for non-JSON formats.
    */
   readSettings(): Record<string, unknown> | null {
-    try {
-      const raw = readFileSync(this.getSettingsPath(), "utf-8");
-      return JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      return null;
+    for (const settingsPath of this.getSettingsPaths()) {
+      try {
+        const raw = readFileSync(settingsPath, "utf-8");
+        return this.parseSettings(raw);
+      } catch {
+        continue;
+      }
     }
+    return null;
+  }
+
+  protected getSettingsPaths(): string[] {
+    return [this.getSettingsPath()];
+  }
+
+  protected parseSettings(raw: string): Record<string, unknown> {
+    return JSON.parse(raw) as Record<string, unknown>;
+  }
+
+  checkPluginRegistration(): DiagnosticResult {
+    let readAnySettings = false;
+    for (const settingsPath of this.getPluginRegistrationSettingsPaths()) {
+      try {
+        const raw = readFileSync(settingsPath, "utf-8");
+        const settings = this.parsePluginRegistrationSettings(raw);
+        readAnySettings = true;
+        const result = this.findPluginEntry(settings, settingsPath);
+        if (result) return result;
+      } catch {
+        continue;
+      }
+    }
+
+    return readAnySettings
+      ? this.getPluginRegistrationNotFoundDiagnostic()
+      : this.getSettingsReadFailureDiagnostic();
+  }
+
+  getInstalledVersion(): string {
+    const settings = this.readVersionSettings();
+    if (!settings) {
+      return "not installed";
+    }
+    return this.extractVersion(settings);
+  }
+
+  protected getPluginRegistrationSettingsPaths(): string[] {
+    return this.getSettingsPaths();
+  }
+
+  protected parsePluginRegistrationSettings(raw: string): Record<string, unknown> {
+    return this.parseSettings(raw);
+  }
+
+  protected readVersionSettings(): Record<string, unknown> | null {
+    return this.readSettings();
+  }
+
+  protected getSettingsReadFailureDiagnostic(): DiagnosticResult {
+    return {
+      check: "Plugin registration",
+      status: "warn",
+      message: "Could not read settings.json",
+    };
+  }
+
+  protected getPluginRegistrationNotFoundDiagnostic(): DiagnosticResult {
+    return {
+      check: "Plugin registration",
+      status: "warn",
+      message: "context-mode not in enabledPlugins (might be using standalone MCP mode)",
+    };
+  }
+
+  protected findPluginEntry(_settings: Record<string, unknown>, _settingsPath: string): DiagnosticResult | null {
+    return null;
+  }
+
+  protected extractVersion(_settings: Record<string, unknown>): string {
+    return "unknown";
   }
 
   /**

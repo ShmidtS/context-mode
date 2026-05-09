@@ -1,4 +1,4 @@
-import { buildNodeCommand } from "../types.js";
+import { createBuildHookCommand, createIsContextModeHook } from "../hooks-helpers.js";
 
 /**
  * adapters/kiro/hooks — Kiro CLI hook definitions and matchers.
@@ -65,6 +65,17 @@ export const OPTIONAL_HOOKS: string[] = [
   HOOK_TYPES.USER_PROMPT_SUBMIT,
 ];
 
+const buildHookCommandForPlatform = createBuildHookCommand<HookType>(
+  HOOK_SCRIPTS,
+  "kiro",
+  "kiro",
+);
+
+const isContextModeHookForPlatform = createIsContextModeHook<HookType>(
+  HOOK_SCRIPTS,
+  (hookType) => buildHookCommandForPlatform(hookType),
+);
+
 /**
  * Check if a hook entry points to a context-mode hook script.
  */
@@ -72,18 +83,12 @@ export function isContextModeHook(
   entry: { command?: string },
   hookType: string,
 ): boolean {
-  const scriptName = HOOK_SCRIPTS[hookType];
-  if (!scriptName) return false;
-  return entry.command?.includes(scriptName) || entry.command?.includes("context-mode hook kiro") || false;
+  return isContextModeHookForPlatform(entry, hookType as HookType);
 }
 
 /**
  * Build the hook command string for a given hook type.
  */
 export function buildHookCommand(hookType: string, pluginRoot?: string): string {
-  const scriptName = HOOK_SCRIPTS[hookType];
-  if (pluginRoot && scriptName) {
-    return buildNodeCommand(`${pluginRoot}/hooks/kiro/${scriptName}`);
-  }
-  return `context-mode hook kiro ${hookType.toLowerCase()}`;
+  return buildHookCommandForPlatform(hookType as HookType, pluginRoot);
 }

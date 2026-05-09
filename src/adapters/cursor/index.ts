@@ -261,16 +261,8 @@ export class CursorAdapter extends BaseAdapter implements HookAdapter {
     return hooks as unknown as HookRegistration;
   }
 
-  readSettings(): Record<string, unknown> | null {
-    for (const configPath of this.getCandidateHookConfigPaths()) {
-      try {
-        const raw = readFileSync(configPath, "utf-8");
-        return JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-    }
-    return null;
+  protected getSettingsPaths(): string[] {
+    return this.getCandidateHookConfigPaths();
   }
 
   writeSettings(settings: Record<string, unknown>): void {
@@ -348,35 +340,31 @@ export class CursorAdapter extends BaseAdapter implements HookAdapter {
     return results;
   }
 
-  checkPluginRegistration(): DiagnosticResult {
-    const mcpPaths = [resolve(".cursor", "mcp.json"), join(homedir(), ".cursor", "mcp.json")];
+  protected getPluginRegistrationSettingsPaths(): string[] {
+    return [resolve(".cursor", "mcp.json"), join(homedir(), ".cursor", "mcp.json")];
+  }
 
-    for (const configPath of mcpPaths) {
-      try {
-        const raw = readFileSync(configPath, "utf-8");
-        const config = JSON.parse(raw) as Record<string, unknown>;
-        const servers = (config.mcpServers ?? config.servers) as Record<string, unknown> | undefined;
-        if (!servers) continue;
+  protected findPluginEntry(settings: Record<string, unknown>, settingsPath: string): DiagnosticResult | null {
+    const servers = (settings.mcpServers ?? settings.servers) as Record<string, unknown> | undefined;
+    if (!servers) return null;
 
-        const hasContextMode = Object.entries(servers).some(([name, value]) => {
-          if (name.includes("context-mode")) return true;
-          if (!value || typeof value !== "object") return false;
-          const server = value as Record<string, unknown>;
-          return server.command === "context-mode";
-        });
+    const hasContextMode = Object.entries(servers).some(([name, value]) => {
+      if (name.includes("context-mode")) return true;
+      if (!value || typeof value !== "object") return false;
+      const server = value as Record<string, unknown>;
+      return server.command === "context-mode";
+    });
 
-        if (hasContextMode) {
-          return {
-            check: "MCP registration",
-            status: "pass",
-            message: `context-mode found in ${configPath}`,
-          };
-        }
-      } catch {
-        continue;
-      }
-    }
+    if (!hasContextMode) return null;
 
+    return {
+      check: "MCP registration",
+      status: "pass",
+      message: `context-mode found in ${settingsPath}`,
+    };
+  }
+
+  protected getSettingsReadFailureDiagnostic(): DiagnosticResult {
     return {
       check: "MCP registration",
       status: "warn",
@@ -384,16 +372,28 @@ export class CursorAdapter extends BaseAdapter implements HookAdapter {
     };
   }
 
-  getInstalledVersion(): string {
+  protected getPluginRegistrationNotFoundDiagnostic(): DiagnosticResult {
+    return {
+      check: "MCP registration",
+      status: "warn",
+      message: "Could not find context-mode in .cursor/mcp.json or ~/.cursor/mcp.json",
+    };
+  }
+
+  protected readVersionSettings(): Record<string, unknown> | null {
     try {
       const output = execSync("cursor --version", {
         encoding: "utf-8",
         stdio: ["ignore", "pipe", "ignore"],
       }).trim();
-      return output.split(/\r?\n/)[0] || "unknown";
+      return { version: output.split(/\r?\n/)[0] || "unknown" };
     } catch {
-      return "not installed";
+      return null;
     }
+  }
+
+  protected extractVersion(settings: Record<string, unknown>): string {
+    return typeof settings.version === "string" ? settings.version : "unknown";
   }
 
   configureAllHooks(_pluginRoot: string): string[] {

@@ -354,39 +354,39 @@ export class GeminiCLIAdapter extends BaseAdapter implements HookAdapter {
     return results;
   }
 
-  checkPluginRegistration(): DiagnosticResult {
-    const settings = this.readSettings();
-    if (!settings) {
-      return {
-        check: "Plugin registration",
-        status: "warn",
-        message: "Could not read ~/.gemini/settings.json",
-      };
-    }
-
-    // Check in extensions or settings for context-mode
+  protected findPluginEntry(settings: Record<string, unknown>): DiagnosticResult | null {
     const extensions = settings.extensions as
       | Record<string, unknown>
       | Array<unknown>
       | undefined;
 
-    if (extensions) {
-      const hasPlugin = Array.isArray(extensions)
-        ? extensions.some(
-            (e) =>
-              typeof e === "string" && e.includes("context-mode"),
-          )
-        : Object.keys(extensions).some((k) => k.includes("context-mode"));
+    if (!extensions) return null;
 
-      if (hasPlugin) {
-        return {
-          check: "Plugin registration",
-          status: "pass",
-          message: "context-mode found in extensions",
-        };
-      }
-    }
+    const hasPlugin = Array.isArray(extensions)
+      ? extensions.some(
+          (e) =>
+            typeof e === "string" && e.includes("context-mode"),
+        )
+      : Object.keys(extensions).some((k) => k.includes("context-mode"));
 
+    if (!hasPlugin) return null;
+
+    return {
+      check: "Plugin registration",
+      status: "pass",
+      message: "context-mode found in extensions",
+    };
+  }
+
+  protected getSettingsReadFailureDiagnostic(): DiagnosticResult {
+    return {
+      check: "Plugin registration",
+      status: "warn",
+      message: "Could not read ~/.gemini/settings.json",
+    };
+  }
+
+  protected getPluginRegistrationNotFoundDiagnostic(): DiagnosticResult {
     return {
       check: "Plugin registration",
       status: "warn",
@@ -394,8 +394,13 @@ export class GeminiCLIAdapter extends BaseAdapter implements HookAdapter {
     };
   }
 
-  getInstalledVersion(): string {
-    return this.readVersionFromExtensionCache([".gemini"]);
+  protected readVersionSettings(): Record<string, unknown> | null {
+    const version = this.readVersionFromExtensionCache([".gemini"]);
+    return version === "not installed" ? null : { version };
+  }
+
+  protected extractVersion(settings: Record<string, unknown>): string {
+    return typeof settings.version === "string" ? settings.version : "unknown";
   }
 
   // ── Upgrade ────────────────────────────────────────────

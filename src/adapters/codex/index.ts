@@ -14,9 +14,6 @@
  * Track: https://github.com/openai/codex/issues/18491
  */
 
-import {
-  readFileSync,
-} from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -260,17 +257,9 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
     };
   }
 
-  readSettings(): Record<string, unknown> | null {
-    // Codex CLI uses TOML format. Full TOML parsing is complex;
-    // return null for now. MCP configuration should be done manually
-    // or via a dedicated TOML library in the upgrade flow.
-    try {
-      const raw = readFileSync(this.getSettingsPath(), "utf-8");
-      // Return raw TOML as a single-key object for inspection
-      return { _raw_toml: raw };
-    } catch {
-      return null;
-    }
+  protected parseSettings(raw: string): Record<string, unknown> {
+    // Return raw TOML as a single-key object for inspection.
+    return { _raw_toml: raw };
   }
 
   writeSettings(_settings: Record<string, unknown>): void {
@@ -292,48 +281,47 @@ export class CodexAdapter extends BaseAdapter implements HookAdapter {
     ];
   }
 
-  checkPluginRegistration(): DiagnosticResult {
-    // Check for context-mode in [mcp_servers] section of config.toml
-    try {
-      const raw = readFileSync(this.getSettingsPath(), "utf-8");
-      const hasContextMode = raw.includes("context-mode");
-      const hasMcpSection =
-        raw.includes("[mcp_servers]") || raw.includes("[mcp_servers.");
+  protected findPluginEntry(settings: Record<string, unknown>): DiagnosticResult {
+    const raw = String(settings._raw_toml ?? "");
+    const hasContextMode = raw.includes("context-mode");
+    const hasMcpSection =
+      raw.includes("[mcp_servers]") || raw.includes("[mcp_servers.");
 
-      if (hasContextMode && hasMcpSection) {
-        return {
-          check: "MCP registration",
-          status: "pass",
-          message: "context-mode found in [mcp_servers] config",
-        };
-      }
+    if (hasContextMode && hasMcpSection) {
+      return {
+        check: "MCP registration",
+        status: "pass",
+        message: "context-mode found in [mcp_servers] config",
+      };
+    }
 
-      if (hasMcpSection) {
-        return {
-          check: "MCP registration",
-          status: "fail",
-          message:
-            "[mcp_servers] section exists but context-mode not found",
-          fix: 'Add context-mode to [mcp_servers] in ~/.codex/config.toml',
-        };
-      }
-
+    if (hasMcpSection) {
       return {
         check: "MCP registration",
         status: "fail",
-        message: "No [mcp_servers] section in config.toml",
-        fix: 'Add [mcp_servers.context-mode] to ~/.codex/config.toml',
-      };
-    } catch {
-      return {
-        check: "MCP registration",
-        status: "warn",
-        message: "Could not read ~/.codex/config.toml",
+        message:
+          "[mcp_servers] section exists but context-mode not found",
+        fix: 'Add context-mode to [mcp_servers] in ~/.codex/config.toml',
       };
     }
+
+    return {
+      check: "MCP registration",
+      status: "fail",
+      message: "No [mcp_servers] section in config.toml",
+      fix: 'Add [mcp_servers.context-mode] to ~/.codex/config.toml',
+    };
   }
 
-  getInstalledVersion(): string {
+  protected getSettingsReadFailureDiagnostic(): DiagnosticResult {
+    return {
+      check: "MCP registration",
+      status: "warn",
+      message: "Could not read ~/.codex/config.toml",
+    };
+  }
+
+  protected extractVersion(_settings: Record<string, unknown>): string {
     // Codex CLI has no marketplace or plugin system
     return "not installed";
   }

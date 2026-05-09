@@ -17,20 +17,19 @@ import { buildNodeCommand } from "./types.js";
  * CLI dispatcher command for the given hook type.
  */
 export function createIsContextModeHook<T extends string>(
-  hookScripts: Record<string, string>,
+  hookScripts: Record<string, string | undefined>,
   getDispatcherCommand: (hookType: T) => string,
 ) {
   return (
-    entry: { hooks?: Array<{ command?: string }> },
+    entry: { command?: string; hooks?: Array<{ command?: string }> },
     hookType: T,
   ): boolean => {
     const scriptName = hookScripts[hookType as string];
     if (!scriptName) return false;
     const cliCommand = getDispatcherCommand(hookType);
-    return (
-      entry.hooks?.some((h) =>
-        h.command?.includes(scriptName) || h.command?.includes(cliCommand),
-      ) ?? false
+    const commands = entry.hooks ?? [entry];
+    return commands.some((h) =>
+      h.command?.includes(scriptName) || h.command?.includes(cliCommand),
     );
   };
 }

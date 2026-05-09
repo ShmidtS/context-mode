@@ -238,16 +238,7 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
     return false;
   }
 
-  checkPluginRegistration(): DiagnosticResult {
-    const settings = this.readSettings();
-    if (!settings) {
-      return {
-        check: "Plugin registration",
-        status: "warn",
-        message: "Could not read settings.json",
-      };
-    }
-
+  protected findPluginEntry(settings: Record<string, unknown>): DiagnosticResult {
     const enabledPlugins = settings.enabledPlugins as
       | Record<string, boolean>
       | undefined;
@@ -278,8 +269,7 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
     };
   }
 
-  getInstalledVersion(): string {
-    // Primary: read from installed_plugins.json
+  protected readVersionSettings(): Record<string, unknown> | null {
     try {
       const ipPath = resolve(
         homedir(),
@@ -287,20 +277,29 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
         "plugins",
         "installed_plugins.json",
       );
-      const ipRaw = JSON.parse(readFileSync(ipPath, "utf-8"));
-      const plugins = ipRaw.plugins ?? {};
-      for (const [key, entries] of Object.entries(plugins)) {
-        if (!key.toLowerCase().includes("context-mode")) continue;
-        const arr = entries as Array<Record<string, unknown>>;
-        if (arr.length > 0 && typeof arr[0].version === "string") {
-          return arr[0].version;
-        }
-      }
+      const settings = JSON.parse(readFileSync(ipPath, "utf-8")) as Record<string, unknown>;
+      return this.extractVersion(settings) === "unknown" ? this.readVersionFromPluginCache() : settings;
     } catch (err) {
       console.warn("detectInstalledVersion plugins failed", err);
     }
 
-    // Fallback: scan common plugin cache locations
+    return this.readVersionFromPluginCache();
+  }
+
+  protected extractVersion(settings: Record<string, unknown>): string {
+    const plugins = (settings.plugins ?? {}) as Record<string, unknown>;
+    for (const [key, entries] of Object.entries(plugins)) {
+      if (!key.toLowerCase().includes("context-mode")) continue;
+      const arr = entries as Array<Record<string, unknown>>;
+      if (arr.length > 0 && typeof arr[0].version === "string") {
+        return arr[0].version;
+      }
+    }
+
+    return typeof settings.version === "string" ? settings.version : "unknown";
+  }
+
+  private readVersionFromPluginCache(): Record<string, unknown> | null {
     const bases = [
       resolve(homedir(), ".claude"),
       resolve(homedir(), ".config", "claude"),
@@ -326,12 +325,12 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
             }
             return 0;
           });
-        if (versions.length > 0) return versions[versions.length - 1];
+        if (versions.length > 0) return { version: versions[versions.length - 1] };
       } catch (err) {
         console.warn("detectInstalledVersion cache scan failed", err);
       }
     }
-    return "not installed";
+    return null;
   }
 
   // ── Upgrade ────────────────────────────────────────────

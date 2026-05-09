@@ -1,7 +1,8 @@
 import "../setup-home";
 import { describe, it, expect } from "vitest";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { BaseAdapter } from "../../src/adapters/base.js";
 
 /**
@@ -21,6 +22,19 @@ class TestAdapter extends BaseAdapter {
   }
   getSettingsPath(): string {
     return join(this.getConfigDir(), "settings.json");
+  }
+  protected findPluginEntry(settings: Record<string, unknown>): ReturnType<BaseAdapter["checkPluginRegistration"]> | null {
+    const plugins = settings.plugins as Record<string, boolean> | undefined;
+    const pluginKey = Object.keys(plugins ?? {}).find((key) => key.startsWith("context-mode") && plugins?.[key]);
+    if (!pluginKey) return null;
+    return {
+      check: "Plugin registration",
+      status: "pass",
+      message: `Plugin enabled: ${pluginKey}`,
+    };
+  }
+  protected extractVersion(settings: Record<string, unknown>): string {
+    return typeof settings.version === "string" ? settings.version : "unknown";
   }
 }
 
@@ -43,5 +57,52 @@ describe("BaseAdapter memory/config defaults", () => {
   it("getMemoryDir defaults to <configDir>/memory", () => {
     const adapter = new TestAdapter([".claude"]);
     expect(adapter.getMemoryDir()).toBe(join(homedir(), ".claude", "memory"));
+  });
+
+  it("reads settings from getSettingsPath", () => {
+    const adapter = new TestAdapter([".base-template"]);
+    const settingsPath = adapter.getSettingsPath();
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify({ version: "1.2.3" }), "utf-8");
+
+    expect(adapter.readSettings()).toEqual({ version: "1.2.3" });
+  });
+
+  it("returns warn when plugin registration settings cannot be read", () => {
+    const adapter = new TestAdapter([".missing-template"]);
+
+    expect(adapter.checkPluginRegistration()).toEqual({
+      check: "Plugin registration",
+      status: "warn",
+      message: "Could not read settings.json",
+    });
+  });
+
+  it("returns pass when findPluginEntry locates an enabled plugin", () => {
+    const adapter = new TestAdapter([".base-template-pass"]);
+    const settingsPath = adapter.getSettingsPath();
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify({ plugins: { "context-mode": true } }), "utf-8");
+
+    expect(adapter.checkPluginRegistration()).toEqual({
+      check: "Plugin registration",
+      status: "pass",
+      message: "Plugin enabled: context-mode",
+    });
+  });
+
+  it("returns not installed when installed version settings cannot be read", () => {
+    const adapter = new TestAdapter([".missing-version"]);
+
+    expect(adapter.getInstalledVersion()).toBe("not installed");
+  });
+
+  it("extracts installed version from readable settings", () => {
+    const adapter = new TestAdapter([".base-template-version"]);
+    const settingsPath = adapter.getSettingsPath();
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    writeFileSync(settingsPath, JSON.stringify({ version: "4.5.6" }), "utf-8");
+
+    expect(adapter.getInstalledVersion()).toBe("4.5.6");
   });
 });
