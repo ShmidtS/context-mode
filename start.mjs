@@ -247,20 +247,40 @@ if (!existsSync(resolve(__dirname, "cli.bundle.mjs")) && existsSync(resolve(__di
   if (process.platform !== "win32") chmodSync(shimPath, 0o755);
 }
 
-// Bundle exists (CI-built) — start instantly
-if (existsSync(resolve(__dirname, "server.bundle.mjs"))) {
-  await import("./server.bundle.mjs");
-} else {
-  // Dev or npm install — full build
+// ── Server bootstrap with auto-rebuild fallback ──
+// Marketplace installs may ship stale/missing bundles; rebuild locally when needed.
+async function tryBundle() {
+  if (!existsSync(resolve(__dirname, "server.bundle.mjs"))) return false;
+  try {
+    await import("./server.bundle.mjs");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function doBuild() {
   if (!existsSync(resolve(__dirname, "node_modules"))) {
     try {
-      execSync("npm install --silent", { cwd: __dirname, stdio: "pipe", timeout: 60000 });
+      execSync("npm install --silent", { cwd: __dirname, stdio: "pipe", timeout: 120000 });
     } catch { /* best effort */ }
   }
-  if (!existsSync(resolve(__dirname, "build", "server.js"))) {
-    try {
-      execSync("npx tsc --silent", { cwd: __dirname, stdio: "pipe", timeout: 30000 });
-    } catch { /* best effort */ }
+  try {
+    execSync("npm run build --silent", { cwd: __dirname, stdio: "pipe", timeout: 120000 });
+  } catch { /* best effort */ }
+}
+
+if (!(await tryBundle())) {
+  await doBuild();
+  if (!(await tryBundle())) {
+    // Fallback: tsc output (slower, no minification)
+    if (!existsSync(resolve(__dirname, "build", "server.js"))) {
+      try {
+        execSync("npx tsc --silent", { cwd: __dirname, stdio: "pipe", timeout: 30000 });
+      } catch { /* best effort */ }
+    }
+    if (existsSync(resolve(__dirname, "build", "server.js"))) {
+      await import("./build/server.js");
+    }
   }
-  await import("./build/server.js");
 }

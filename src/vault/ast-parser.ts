@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import type { CodeSymbol } from '../types.js'
 
 // ─────────────────────────────────────────────────────────
-// Optional tree-sitter import
+// Optional tree-sitter import (async top-level for ESM compat)
 // ─────────────────────────────────────────────────────────
 
 let Parser: any = null
@@ -18,10 +18,9 @@ let TypeScriptLang: any = null
 let tsxLang: any = null
 
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  Parser = require('tree-sitter')
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const tsModule = require('tree-sitter-typescript')
+  const treeSitter = await import('tree-sitter' as string)
+  Parser = treeSitter.default || treeSitter.Parser || treeSitter
+  const tsModule = await import('tree-sitter-typescript' as string)
   TypeScriptLang = tsModule.typescript
   tsxLang = tsModule.tsx
 } catch (err) {
