@@ -1,11 +1,5 @@
 # Context Mode
 
-**The other half of the context problem.**
-
-[![users](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2FShmidtS%2Fcontext-mode%40main%2Fstats.json&query=%24.message&label=users&color=brightgreen)](https://www.npmjs.com/package/context-mode) [![npm](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2FShmidtS%2Fcontext-mode%40main%2Fstats.json&query=%24.npm&label=npm&color=blue)](https://www.npmjs.com/package/context-mode) [![marketplace](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fcdn.jsdelivr.net%2Fgh%2FShmidtS%2Fcontext-mode%40main%2Fstats.json&query=%24.marketplace&label=marketplace&color=blue)](https://github.com/ShmidtS/context-mode) [![GitHub stars](https://img.shields.io/github/stars/ShmidtS/context-mode?style=flat&color=yellow)](https://github.com/ShmidtS/context-mode/stargazers) [![GitHub forks](https://img.shields.io/github/forks/ShmidtS/context-mode?style=flat&color=blue)](https://github.com/ShmidtS/context-mode/network/members) [![Last commit](https://img.shields.io/github/last-commit/ShmidtS/context-mode?color=green)](https://github.com/ShmidtS/context-mode/commits) [![License: ELv2](https://img.shields.io/badge/License-ELv2-blue.svg)](LICENSE)
-[![Discord](https://img.shields.io/discord/1478479412700909750?label=Discord&logo=discord&color=5865f2)](https://discord.gg/DCN9jUgN5v)
-[![Hacker News #1](https://img.shields.io/badge/Hacker%20News-%231%20%E2%80%A2%20570%2B%20points-ff6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/item?id=47193064)
-
 ## Features
 
 1. **Context Saving** — Sandbox tools keep raw data out of context. 315 KB becomes 5.4 KB (98%).
@@ -19,6 +13,9 @@
 
 ```bash
 /plugin marketplace add ShmidtS/context-mode
+```
+
+```bash
 /plugin install context-mode@context-mode
 ```
 
@@ -26,10 +23,32 @@
 
 ```bash
 git clone https://github.com/ShmidtS/context-mode.git
-cd context-mode && npm install && npm run build
+cd context-mode
+npm install
+npm run build
+npm link        # optional: makes `context-mode` available in PATH
 ```
 
-See [platform-specific setup](docs/platform-support.md) (Cursor, Copilot, Gemini CLI, Codex, OpenCode, Zed, and 8 more).
+Then register the MCP server in your AI client. For **Claude Code**:
+
+```bash
+/mcp add context-mode node /absolute/path/to/context-mode/start.mjs
+```
+
+Or manually add to `~/.claude.json` (replace the path with the absolute path to the cloned repo):
+
+```json
+{
+  "mcpServers": {
+    "context-mode": {
+      "command": "node",
+      "args": ["/absolute/path/to/context-mode/start.mjs"]
+    }
+  }
+}
+```
+
+For other platforms (Cursor, VS Code Copilot, Gemini CLI, Codex, OpenCode, Zed, and 8 more), see [platform-specific setup](docs/platform-support.md).
 
 ## Tools
 
