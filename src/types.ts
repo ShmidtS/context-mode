@@ -184,6 +184,8 @@ export interface VaultEdge {
   line_number: number | null;
   context: string | null;
   edge_type: string;
+  /** Confidence level: EXTRACTED (from source), INFERRED (LLM deduction), AMBIGUOUS (flagged for review). */
+  confidence: "EXTRACTED" | "INFERRED" | "AMBIGUOUS";
 }
 
 /**
@@ -284,4 +286,6 @@ export interface GraphSearchResult {
   matchLayer?: "bfs" | "backlinks" | "tag-cluster" | "rrf-graph";
   source?: string;
   origin?: "vault-graph";
+  /** Edge confidence if this result originates from an edge traversal. */
+  confidence?: "EXTRACTED" | "INFERRED" | "AMBIGUOUS";
 }

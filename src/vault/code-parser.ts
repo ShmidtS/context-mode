@@ -94,6 +94,65 @@ const CSS_IMPORT_RE = /@import\s+(?:url\s*\(\s*)?['"]([^'"]+)['"]\s*\)?/g;
 const CSS_USE_RE = /@(?:use|forward)\s+['"]([^'"]+)['"]/g;
 
 // ─────────────────────────────────────────────────────────
+// Handler table
+// ─────────────────────────────────────────────────────────
+
+type IsExternalMode = "auto" | true | false;
+
+interface ImportHandler {
+  /** Source regex pattern — cloned per invocation to avoid shared lastIndex. */
+  readonly re: RegExp;
+  /** File extensions this handler applies to. */
+  readonly extensions: readonly string[];
+  /** If true, specifier comes from match[1] ?? match[2]; otherwise match[1]. */
+  readonly multiCapture: boolean;
+  /** Import kind for produced entries. */
+  readonly kind: ImportEntry["kind"];
+  /** If true, resolve specifier via resolveImportSpecifier; otherwise force null. */
+  readonly resolvePath: boolean;
+  /** How to determine isExternal: "auto" = computed, true/false = fixed. */
+  readonly isExternal: IsExternalMode;
+}
+
+const IMPORT_HANDLERS: readonly ImportHandler[] = [
+  // JS/TS
+  { re: STATIC_IMPORT_RE, extensions: [".ts", ".js", ".mjs", ".cjs"], multiCapture: false, kind: "static", resolvePath: true, isExternal: "auto" },
+  { re: DYNAMIC_IMPORT_RE, extensions: [".ts", ".js", ".mjs", ".cjs"], multiCapture: false, kind: "dynamic", resolvePath: true, isExternal: "auto" },
+  { re: REQUIRE_RE, extensions: [".ts", ".js", ".mjs", ".cjs"], multiCapture: false, kind: "require", resolvePath: true, isExternal: "auto" },
+  { re: EXPORT_FROM_RE, extensions: [".ts", ".js", ".mjs", ".cjs"], multiCapture: false, kind: "export-from", resolvePath: true, isExternal: "auto" },
+  // Python
+  { re: PYTHON_IMPORT_RE, extensions: [".py", ".pyi", ".pyw"], multiCapture: true, kind: "static", resolvePath: true, isExternal: "auto" },
+  // Go
+  { re: GO_IMPORT_RE, extensions: [".go"], multiCapture: true, kind: "static", resolvePath: true, isExternal: true },
+  // Rust
+  { re: RUST_USE_RE, extensions: [".rs"], multiCapture: false, kind: "static", resolvePath: false, isExternal: true },
+  { re: RUST_EXTERN_RE, extensions: [".rs"], multiCapture: false, kind: "static", resolvePath: false, isExternal: true },
+  { re: RUST_MOD_RE, extensions: [".rs"], multiCapture: false, kind: "static", resolvePath: true, isExternal: false },
+  // Java / C# / Kotlin / Scala
+  { re: JAVA_IMPORT_RE, extensions: [".java", ".kt", ".kts", ".scala", ".sc", ".cs"], multiCapture: false, kind: "static", resolvePath: false, isExternal: true },
+  // C / C++
+  { re: C_INCLUDE_RE, extensions: [".c", ".h", ".cpp", ".cxx", ".cc", ".hpp", ".hxx"], multiCapture: false, kind: "static", resolvePath: true, isExternal: "auto" },
+  // PHP
+  { re: PHP_INCLUDE_RE, extensions: [".php", ".phtml", ".php3", ".php4", ".php5", ".phps"], multiCapture: false, kind: "require", resolvePath: true, isExternal: "auto" },
+  { re: PHP_USE_RE, extensions: [".php", ".phtml", ".php3", ".php4", ".php5", ".phps"], multiCapture: false, kind: "static", resolvePath: false, isExternal: true },
+  // Ruby
+  { re: RUBY_REQUIRE_RE, extensions: [".rb", ".rbx", ".ru"], multiCapture: false, kind: "require", resolvePath: true, isExternal: "auto" },
+  // Lua
+  { re: LUA_REQUIRE_RE, extensions: [".lua"], multiCapture: false, kind: "require", resolvePath: true, isExternal: "auto" },
+  // Shell
+  { re: SHELL_SOURCE_RE, extensions: [".sh", ".bash", ".zsh", ".fish", ".ksh", ".csh", ".tcsh"], multiCapture: false, kind: "require", resolvePath: true, isExternal: "auto" },
+  // HTML
+  { re: HTML_SRC_RE, extensions: [".html", ".htm", ".xhtml"], multiCapture: false, kind: "static", resolvePath: true, isExternal: false },
+  { re: HTML_HREF_RE, extensions: [".html", ".htm", ".xhtml"], multiCapture: false, kind: "static", resolvePath: true, isExternal: false },
+  // CSS / SCSS / SASS / LESS
+  { re: CSS_IMPORT_RE, extensions: [".css", ".scss", ".sass", ".less", ".styl", ".stylus"], multiCapture: false, kind: "static", resolvePath: true, isExternal: "auto" },
+  { re: CSS_USE_RE, extensions: [".css", ".scss", ".sass", ".less", ".styl", ".stylus"], multiCapture: false, kind: "static", resolvePath: true, isExternal: "auto" },
+];
+
+/** Extensions with no handler but still recognized as supported (placeholder for future support). */
+const PLACEHOLDER_EXTS: readonly string[] = [".swift", ".ps1", ".psm1", ".psd1"];
+
+// ─────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────
 
@@ -178,8 +237,22 @@ function extractContext(line: string, matchIndex: number, matchLength: number): 
 }
 
 /**
+ * Collect all file extensions covered by any handler or placeholder.
+ * Used for the early-return check when the file extension is unsupported.
+ */
+const ALL_SUPPORTED_EXTS: ReadonlySet<string> = new Set([
+  ...IMPORT_HANDLERS.flatMap((h) => h.extensions),
+  ...PLACEHOLDER_EXTS,
+]);
+
+function computeIsExternal(mode: IsExternalMode, specifier: string, resolvedPath: string | null): boolean {
+  if (mode === "auto") return !specifier.startsWith(".") && resolvedPath === null;
+  return mode;
+}
+
+/**
  * Extract import/dependency entries from a source file based on its language.
- * Dispatches to language-specific regexes.
+ * Dispatches to language-specific regexes via a table-driven approach.
  */
 function extractImports(
   ext: string,
@@ -188,348 +261,42 @@ function extractImports(
   allPaths: Set<string> | undefined,
   vaultRoot: string | undefined,
 ): ImportEntry[] {
+  if (!ALL_SUPPORTED_EXTS.has(ext)) return [];
+
+  // Filter handlers applicable to this file extension, cloning their regexes
+  // to avoid shared lastIndex across invocations.
+  const active = IMPORT_HANDLERS
+    .filter((h) => h.extensions.includes(ext))
+    .map((h) => ({
+      ...h,
+      re: new RegExp(h.re.source, h.re.flags),
+    }));
+
   const imports: ImportEntry[] = [];
-
-  const isJsLike = [".ts", ".js", ".mjs", ".cjs"].includes(ext);
-  const isPy = [".py", ".pyi", ".pyw"].includes(ext);
-  const isGo = ext === ".go";
-  const isRust = ext === ".rs";
-  const isJavaLike = [".java", ".kt", ".kts", ".scala", ".sc"].includes(ext);
-  const isCs = ext === ".cs";
-  const isSwift = ext === ".swift";
-  const isC = [".c", ".h", ".cpp", ".cxx", ".cc", ".hpp", ".hxx"].includes(ext);
-  const isRuby = [".rb", ".rbx", ".ru"].includes(ext);
-  const isPhp = [".php", ".phtml", ".php3", ".php4", ".php5", ".phps"].includes(ext);
-  const isLua = ext === ".lua";
-  const isShell = [".sh", ".bash", ".zsh", ".fish", ".ksh", ".csh", ".tcsh"].includes(ext);
-  const isPs = [".ps1", ".psm1", ".psd1"].includes(ext);
-  const isHtml = [".html", ".htm", ".xhtml"].includes(ext);
-  const isCss = [".css", ".scss", ".sass", ".less", ".styl", ".stylus"].includes(ext);
-
-  if (!isJsLike && !isPy && !isGo && !isRust && !isJavaLike && !isCs && !isSwift && !isC && !isRuby && !isPhp && !isLua && !isShell && !isPs && !isHtml && !isCss) {
-    return imports;
-  }
-
-  const staticRe = isJsLike ? new RegExp(STATIC_IMPORT_RE.source, STATIC_IMPORT_RE.flags) : null;
-  const dynamicRe = isJsLike ? new RegExp(DYNAMIC_IMPORT_RE.source, DYNAMIC_IMPORT_RE.flags) : null;
-  const requireRe = isJsLike ? new RegExp(REQUIRE_RE.source, REQUIRE_RE.flags) : null;
-  const exportRe = isJsLike ? new RegExp(EXPORT_FROM_RE.source, EXPORT_FROM_RE.flags) : null;
-  const pyRe = isPy ? new RegExp(PYTHON_IMPORT_RE.source, PYTHON_IMPORT_RE.flags) : null;
-  const goRe = isGo ? new RegExp(GO_IMPORT_RE.source, GO_IMPORT_RE.flags) : null;
-  const rustUseRe = isRust ? new RegExp(RUST_USE_RE.source, RUST_USE_RE.flags) : null;
-  const rustExternRe = isRust ? new RegExp(RUST_EXTERN_RE.source, RUST_EXTERN_RE.flags) : null;
-  const rustModRe = isRust ? new RegExp(RUST_MOD_RE.source, RUST_MOD_RE.flags) : null;
-  const javaRe = (isJavaLike || isCs) ? new RegExp(JAVA_IMPORT_RE.source, JAVA_IMPORT_RE.flags) : null;
-  const cRe = isC ? new RegExp(C_INCLUDE_RE.source, C_INCLUDE_RE.flags) : null;
-  const phpIncludeRe = isPhp ? new RegExp(PHP_INCLUDE_RE.source, PHP_INCLUDE_RE.flags) : null;
-  const phpUseRe = isPhp ? new RegExp(PHP_USE_RE.source, PHP_USE_RE.flags) : null;
-  const rubyRe = isRuby ? new RegExp(RUBY_REQUIRE_RE.source, RUBY_REQUIRE_RE.flags) : null;
-  const luaRe = isLua ? new RegExp(LUA_REQUIRE_RE.source, LUA_REQUIRE_RE.flags) : null;
-  const shellRe = isShell ? new RegExp(SHELL_SOURCE_RE.source, SHELL_SOURCE_RE.flags) : null;
-  const htmlSrcRe = isHtml ? new RegExp(HTML_SRC_RE.source, HTML_SRC_RE.flags) : null;
-  const htmlHrefRe = isHtml ? new RegExp(HTML_HREF_RE.source, HTML_HREF_RE.flags) : null;
-  const cssImportRe = isCss ? new RegExp(CSS_IMPORT_RE.source, CSS_IMPORT_RE.flags) : null;
-  const cssUseRe = isCss ? new RegExp(CSS_USE_RE.source, CSS_USE_RE.flags) : null;
 
   for (let i = 0; i < lines.length; i++) {
     const lineText = lines[i];
-    let match: RegExpExecArray | null;
 
-    // Reset lastIndex before each line
-    if (staticRe) staticRe.lastIndex = 0;
-    if (dynamicRe) dynamicRe.lastIndex = 0;
-    if (requireRe) requireRe.lastIndex = 0;
-    if (exportRe) exportRe.lastIndex = 0;
-    if (pyRe) pyRe.lastIndex = 0;
-    if (goRe) goRe.lastIndex = 0;
-    if (rustUseRe) rustUseRe.lastIndex = 0;
-    if (rustExternRe) rustExternRe.lastIndex = 0;
-    if (rustModRe) rustModRe.lastIndex = 0;
-    if (javaRe) javaRe.lastIndex = 0;
-    if (cRe) cRe.lastIndex = 0;
-    if (phpIncludeRe) phpIncludeRe.lastIndex = 0;
-    if (phpUseRe) phpUseRe.lastIndex = 0;
-    if (rubyRe) rubyRe.lastIndex = 0;
-    if (luaRe) luaRe.lastIndex = 0;
-    if (shellRe) shellRe.lastIndex = 0;
-    if (htmlSrcRe) htmlSrcRe.lastIndex = 0;
-    if (htmlHrefRe) htmlHrefRe.lastIndex = 0;
-    if (cssImportRe) cssImportRe.lastIndex = 0;
-    if (cssUseRe) cssUseRe.lastIndex = 0;
+    for (const handler of active) {
+      handler.re.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = handler.re.exec(lineText)) !== null) {
+        const specifier = handler.multiCapture
+          ? (match[1] ?? match[2])
+          : match[1];
+        const resolvedPath = handler.resolvePath && allPaths
+          ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot)
+          : null;
 
-    // JS/TS static imports
-    while (staticRe && (match = staticRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    // JS/TS dynamic imports
-    while (dynamicRe && (match = dynamicRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "dynamic",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    // JS/TS require() calls
-    while (requireRe && (match = requireRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "require",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    // JS/TS export-from
-    while (exportRe && (match = exportRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "export-from",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    // Python imports (from x import y, import x)
-    while (pyRe && (match = pyRe.exec(lineText)) !== null) {
-      const specifier = match[1] ?? match[2];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    // Go imports
-    while (goRe && (match = goRe.exec(lineText)) !== null) {
-      const specifier = match[1] ?? match[2];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: true,
-      });
-    }
-
-    // Rust use statements
-    while (rustUseRe && (match = rustUseRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      imports.push({
-        specifier,
-        resolvedPath: null,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: true,
-      });
-    }
-
-    // Rust extern crate
-    while (rustExternRe && (match = rustExternRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      imports.push({
-        specifier,
-        resolvedPath: null,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: true,
-      });
-    }
-
-    // Rust mod statements
-    while (rustModRe && (match = rustModRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: false,
-      });
-    }
-
-    // Java / C# / Kotlin / Scala imports
-    while (javaRe && (match = javaRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      imports.push({
-        specifier,
-        resolvedPath: null,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: true,
-      });
-    }
-
-    // C / C++ includes
-    while (cRe && (match = cRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    // PHP include/require
-    while (phpIncludeRe && (match = phpIncludeRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "require",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    // PHP use statements
-    while (phpUseRe && (match = phpUseRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      imports.push({
-        specifier,
-        resolvedPath: null,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: true,
-      });
-    }
-
-    // Ruby require/load
-    while (rubyRe && (match = rubyRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "require",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    // Lua require/dofile
-    while (luaRe && (match = luaRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "require",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    // Shell source
-    while (shellRe && (match = shellRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "require",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    // HTML src references
-    while (htmlSrcRe && (match = htmlSrcRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: false,
-      });
-    }
-
-    // HTML href references
-    while (htmlHrefRe && (match = htmlHrefRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: false,
-      });
-    }
-
-    // CSS @import / @use / @forward
-    while (cssImportRe && (match = cssImportRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
-    }
-
-    while (cssUseRe && (match = cssUseRe.exec(lineText)) !== null) {
-      const specifier = match[1];
-      const resolvedPath = allPaths ? resolveImportSpecifier(specifier, sourceDir, allPaths, vaultRoot) : null;
-      imports.push({
-        specifier,
-        resolvedPath,
-        lineNumber: i + 1,
-        context: extractContext(lineText, match.index, match[0].length),
-        kind: "static",
-        isExternal: !specifier.startsWith('.') && resolvedPath === null,
-      });
+        imports.push({
+          specifier,
+          resolvedPath,
+          lineNumber: i + 1,
+          context: extractContext(lineText, match.index, match[0].length),
+          kind: handler.kind,
+          isExternal: computeIsExternal(handler.isExternal, specifier, resolvedPath),
+        });
+      }
     }
   }
 

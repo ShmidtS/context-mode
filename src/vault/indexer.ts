@@ -74,6 +74,7 @@ export interface VaultEdge {
   targetName?: string;
   context: string;
   lineNumber: number;
+  confidence?: "EXTRACTED" | "INFERRED" | "AMBIGUOUS";
 }
 
 /** Minimal store interface the indexer requires. */
@@ -441,6 +442,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
         alias: wl.alias,
         context: wl.context,
         lineNumber: wl.lineNumber,
+        confidence: "EXTRACTED",
       });
     }
 
@@ -461,6 +463,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
         linkType: isCodeLink ? "reference" : "markdown",
         context: ml.context,
         lineNumber: ml.lineNumber,
+        confidence: "EXTRACTED",
       });
     }
   }
@@ -480,6 +483,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
           linkType: "import",
           context: imp.context,
           lineNumber: imp.lineNumber,
+          confidence: "EXTRACTED",
         });
       } else if (imp.isExternal) {
         store.upsertEdge({
@@ -489,6 +493,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
           targetName: imp.specifier,
           context: imp.context,
           lineNumber: imp.lineNumber,
+          confidence: "EXTRACTED",
         });
       } else {
         store.upsertEdge({
@@ -498,6 +503,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
           targetName: imp.specifier,
           context: imp.context,
           lineNumber: imp.lineNumber,
+          confidence: "EXTRACTED",
         });
       }
     }
@@ -528,6 +534,7 @@ export function indexVault(vaultRoot: string, store: VaultGraphStore, opts?: Ind
         targetName: edge.targetSymbol,
         context: "",
         lineNumber: -1,
+        confidence: "EXTRACTED",
       });
     }
   }

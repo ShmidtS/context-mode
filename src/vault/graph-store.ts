@@ -43,6 +43,7 @@ type EdgeRow = {
   line_number: number | null;
   context: string | null;
   edge_type: string;
+  confidence: string | null;
 };
 
 /** Row shape from vault_tags queries. */
@@ -74,6 +75,7 @@ function assertSafeIdentifier(name: string, kind: string): void {
 /** Allowed column definitions for migration (whitelist). */
 const ALLOWED_DEFINITIONS: ReadonlySet<string> = new Set([
   "TEXT NOT NULL DEFAULT 'vault'",
+  "TEXT NOT NULL DEFAULT 'EXTRACTED'",
   "TEXT",
   "INTEGER NOT NULL DEFAULT 0",
   "INTEGER",
@@ -189,6 +191,7 @@ export class VaultGraphStore {
         line_number INTEGER,
         context     TEXT,
         edge_type   TEXT NOT NULL DEFAULT 'wikilink',
+        confidence  TEXT NOT NULL DEFAULT 'EXTRACTED',
         FOREIGN KEY (source_id) REFERENCES vault_nodes(id)
       );
       CREATE INDEX IF NOT EXISTS idx_vault_edges_source ON vault_edges(source_id);
@@ -217,6 +220,7 @@ export class VaultGraphStore {
     // Migrate: add source_type and connector_meta columns (safe for existing DBs)
     this.#addColumnIfMissing('vault_nodes', 'source_type', "TEXT NOT NULL DEFAULT 'vault'")
     this.#addColumnIfMissing('vault_nodes', 'connector_meta', 'TEXT')
+    this.#addColumnIfMissing('vault_edges', 'confidence', "TEXT NOT NULL DEFAULT 'EXTRACTED'")
   }
 
   /** Add a column to a table if it does not already exist. O(1) in SQLite. */
@@ -260,7 +264,7 @@ export class VaultGraphStore {
       "DELETE FROM vault_frontmatter_keys WHERE node_id = ?"
     );
     this.#stmtInsertEdge = this.#db.prepare(
-      "INSERT INTO vault_edges (source_id, target_id, target_name, alias, line_number, context, edge_type) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO vault_edges (source_id, target_id, target_name, alias, line_number, context, edge_type, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     );
     this.#stmtInsertTag = this.#db.prepare(
       "INSERT INTO vault_tags (tag, node_id) VALUES (?, ?)"
@@ -437,8 +441,9 @@ export class VaultGraphStore {
     lineNumber: number | null,
     context: string | null,
     edgeType: string = "wikilink",
+    confidence: "EXTRACTED" | "INFERRED" | "AMBIGUOUS" = "EXTRACTED",
   ): void {
-    this.#stmtInsertEdge.run(sourceId, targetId, targetName, alias, lineNumber, context, edgeType);
+    this.#stmtInsertEdge.run(sourceId, targetId, targetName, alias, lineNumber, context, edgeType, confidence);
   }
 
   /** Delete all edges originating from a node. */
@@ -591,6 +596,7 @@ export class VaultGraphStore {
       line_number: r.line_number,
       context: r.context,
       edge_type: r.edge_type,
+      confidence: (r.confidence as VaultEdge["confidence"]) ?? "EXTRACTED",
     };
   }
 }

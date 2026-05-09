@@ -12,6 +12,7 @@ import {
   type ToolResult,
 } from "./shared.js";
 import { loadDatabase } from "../db-base.js";
+import { analyzeGraph } from "../vault/analytics.js";
 
 export function registerVaultTools(
   server: import("@modelcontextprotocol/sdk/server/mcp.js").McpServer,
@@ -188,6 +189,55 @@ export function registerVaultTools(
         const message = err instanceof Error ? err.message : String(err);
         return trackResponse("ctx_vault_graph", {
           content: [{ type: "text" as const, text: `Vault graph error: ${message}` }],
+          isError: true,
+        });
+      }
+    },
+  );
+
+  // ── ctx_graph_analyze ────────────────────────────────────
+
+  server.registerTool(
+    "ctx_graph_analyze",
+    {
+      title: "Analyze Vault Graph",
+      description:
+        "Run graph intelligence analysis over the indexed vault. " +
+        "Returns god nodes (architectural hubs), surprising cross-module connections, " +
+        "community clustering hints, and suggested questions to explore the graph. " +
+        "Requires prior indexing via ctx_vault_index.",
+      inputSchema: z.object({
+        vaultPath: z.string().optional().describe("Filter analysis to a specific vault path (optional)"),
+        godNodeLimit: z.number().min(1).max(50).optional().default(10).describe("Max god nodes to return"),
+        surpriseLimit: z.number().min(1).max(50).optional().default(10).describe("Max surprising connections"),
+        communityLimit: z.number().min(1).max(20).optional().default(5).describe("Max community hints"),
+        questionLimit: z.number().min(1).max(20).optional().default(5).describe("Max suggested questions"),
+      }),
+    },
+    async (args) => {
+      try {
+        const { store, search } = await getSharedVaultStore();
+
+        if (isProjectVaultEmpty()) {
+          return trackResponse("ctx_graph_analyze", {
+            content: [{ type: "text" as const, text: "No vault indexed. Run ctx_vault_index first." }],
+          });
+        }
+
+        const result = analyzeGraph(store, search, {
+          godNodeLimit: args.godNodeLimit,
+          surpriseLimit: args.surpriseLimit,
+          communityLimit: args.communityLimit,
+          questionLimit: args.questionLimit,
+        });
+
+        return trackResponse("ctx_graph_analyze", {
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return trackResponse("ctx_graph_analyze", {
+          content: [{ type: "text" as const, text: `Graph analysis error: ${message}` }],
           isError: true,
         });
       }

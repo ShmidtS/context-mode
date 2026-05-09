@@ -65,6 +65,7 @@ export function createVaultAdapter(
         edge.lineNumber,
         edge.context ?? null,
         edge.linkType,
+        edge.confidence ?? "EXTRACTED",
       );
     },
     removeEdgesFrom: (sourcePath: string) => {
