@@ -1,7 +1,7 @@
 import "../setup-home";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { ZedAdapter } from "../../src/adapters/zed/index.js";
+import { ZedAdapter } from "../../src/adapters/experimental/zed/index.js";
 import { testMcpOnlyAdapter } from "../shared/adapter-harness.js";
 
 testMcpOnlyAdapter({

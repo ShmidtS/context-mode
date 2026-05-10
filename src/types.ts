@@ -103,6 +103,10 @@ export interface SearchResult {
   matchLayer?: "porter" | "trigram" | "fuzzy" | "rrf" | "rrf-fuzzy" | "rrf-3way" | "semantic" | "hybrid";
   highlighted?: string;
   timestamp?: string;
+  /** 0-1 confidence score derived from rank position and relative BM25/RRF score. */
+  confidence?: number;
+  /** Source of the confidence value: EXTRACTED (top rank), INFERRED (above median), AMBIGUOUS (below median). */
+  confidenceSource?: "EXTRACTED" | "INFERRED" | "AMBIGUOUS";
 }
 
 /**

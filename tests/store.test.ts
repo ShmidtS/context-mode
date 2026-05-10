@@ -1374,7 +1374,7 @@ describe("Persistent content store lifecycle", () => {
 describe("SQLITE_BUSY retry logic", () => {
   test("ContentStore uses 30s timeout", async () => {
     const storeSrc = readFileSync(
-      join(__dirname, "../src/store.ts"),
+      join(__dirname, "../src/store/content-store.ts"),
       "utf-8",
     );
     expect(storeSrc).toContain("timeout: 30000");

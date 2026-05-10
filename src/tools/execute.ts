@@ -6,16 +6,17 @@ import { z } from "zod";
 import { Buffer } from "node:buffer";
 import { type PolyglotExecutor } from "../executor.js";
 import {
-  trackResponse,
-  trackIndexed,
   getStore,
-  checkDenyPolicy,
-  checkNonShellDenyPolicy,
-  checkFilePathDenyPolicy,
   INTENT_SEARCH_THRESHOLD,
   LARGE_OUTPUT_THRESHOLD,
   type ToolResult,
-} from "./shared.js";
+} from "./paths.js";
+import { trackResponse, trackIndexed } from "./stats.js";
+import {
+  checkDenyPolicy,
+  checkNonShellDenyPolicy,
+  checkFilePathDenyPolicy,
+} from "./security-helpers.js";
 import { classifyNonZeroExit } from "../exit-classify.js";
 import { getAvailableLanguages, hasBunRuntime } from "../runtime.js";
 import { detectRuntimes } from "../runtime.js";

@@ -13,8 +13,21 @@ import type { VaultGraphSearch } from "../vault/search.js";
 import { searchAutoMemory, type AutoMemoryAdapter } from "./auto-memory.js";
 import type { VectorStore } from "./vector-store.js";
 import type { EmbeddingProvider } from "./embedding.js";
+import { reciprocalRankFuse } from "./rrf.js";
 
 const DEBUG = process.env.DEBUG?.includes("context-mode");
+
+/**
+ * Map edge confidence tag to a numeric confidence score.
+ * EXTRACTED → 0.95, INFERRED → 0.75, AMBIGUOUS → 0.55.
+ */
+function confidenceFromEdge(confidence: "EXTRACTED" | "INFERRED" | "AMBIGUOUS"): number {
+  switch (confidence) {
+    case "EXTRACTED": return 0.95;
+    case "INFERRED": return 0.75;
+    case "AMBIGUOUS": return 0.55;
+  }
+}
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -31,6 +44,10 @@ export interface UnifiedSearchResult {
   highlighted?: string;
   contentType?: "code" | "prose";
   estimatedTokens?: number;
+  /** 0-1 confidence score propagated from underlying search layer. */
+  confidence?: number;
+  /** Source of the confidence value: EXTRACTED, INFERRED, or AMBIGUOUS. */
+  confidenceSource?: "EXTRACTED" | "INFERRED" | "AMBIGUOUS";
 }
 
 export interface SearchAllSourcesOpts {
@@ -110,6 +127,8 @@ export async function searchAllSources(opts: SearchAllSourcesOpts): Promise<Unif
           matchLayer: r.matchLayer,
           highlighted: r.highlighted,
           contentType: r.contentType,
+          confidence: r.confidence,
+          confidenceSource: r.confidenceSource,
         }));
         return { storeResults, unified };
       } catch (e) {
@@ -176,6 +195,8 @@ export async function searchAllSources(opts: SearchAllSourcesOpts): Promise<Unif
             rank: gr.fusionScore,
             matchLayer: gr.matchLayer,
             contentType: "prose",
+            confidence: gr.confidence ? confidenceFromEdge(gr.confidence) : 0.7,
+            confidenceSource: gr.confidence ?? "INFERRED",
           });
         }
       } else {
@@ -190,6 +211,8 @@ export async function searchAllSources(opts: SearchAllSourcesOpts): Promise<Unif
             rank: gr.fusionScore,
             matchLayer: gr.matchLayer,
             contentType: "prose",
+            confidence: gr.confidence ? confidenceFromEdge(gr.confidence) : 0.7,
+            confidenceSource: gr.confidence ?? "INFERRED",
           });
         }
       }
@@ -198,7 +221,9 @@ export async function searchAllSources(opts: SearchAllSourcesOpts): Promise<Unif
     }
   }
 
-  // ── Source 5: Semantic / vector search (both modes, when vectorStore + embeddingProvider present) ──
+  // ── Source 5: Semantic / vector search (via Ollama embeddings) ──
+  // Vector similarity search via Ollama embeddings. Results are RRF-fused with existing sources.
+  // Requires a running Ollama instance with an embedding model. Falls back gracefully if unavailable.
   if (vectorStore && embeddingProvider && query.trim().length > 0) {
     try {
       const queryEmbedding = await embeddingProvider.embed(query);
@@ -212,46 +237,24 @@ export async function searchAllSources(opts: SearchAllSourcesOpts): Promise<Unif
 
         // RRF-fuse semantic results into the existing result set.
         // Uses the same RRF constant K=60 as ContentStore's rrfSearch.
-        const K = 60;
+        const semanticMapped: UnifiedSearchResult[] = vectorResults.map((vr) => ({
+          title: `Node ${vr.nodeId}`,
+          content: `Semantic match (similarity: ${vr.similarity.toFixed(3)})`,
+          source: `node-${vr.nodeId}`,
+          origin: "semantic" as const,
+          rank: vr.similarity,
+          matchLayer: "semantic",
+          estimatedTokens: Math.ceil(`Semantic match (similarity: ${vr.similarity.toFixed(3)})`.length / 4),
+          confidence: vr.similarity,
+          confidenceSource: vr.similarity >= 0.9 ? "EXTRACTED" as const : vr.similarity >= 0.75 ? "INFERRED" as const : "AMBIGUOUS" as const,
+        }));
 
-        // Build a key-based score map from existing results for RRF merging
-        const rrfMap = new Map<string, { result: UnifiedSearchResult; score: number }>();
         const resultKey = (r: UnifiedSearchResult) => `${r.source}::${r.title}`;
+        const fused = reciprocalRankFuse([results, semanticMapped], resultKey);
 
-        for (const [i, r] of results.entries()) {
-          const k = resultKey(r);
-          rrfMap.set(k, { result: r, score: 1 / (K + i + 1) });
-        }
-
-        // Add semantic results with RRF scoring
-        for (const [i, vr] of vectorResults.entries()) {
-          const key = `semantic::node-${vr.nodeId}`;
-          const existing = rrfMap.get(key);
-          const semScore = 1 / (K + i + 1);
-          if (existing) {
-            existing.score += semScore;
-          } else {
-            rrfMap.set(key, {
-              result: {
-                title: `Node ${vr.nodeId}`,
-                content: `Semantic match (similarity: ${vr.similarity.toFixed(3)})`,
-                source: `node-${vr.nodeId}`,
-                origin: "semantic" as const,
-                rank: vr.similarity,
-                matchLayer: "semantic",
-                estimatedTokens: Math.ceil(`Semantic match (similarity: ${vr.similarity.toFixed(3)})`.length / 4),
-              },
-              score: semScore,
-            });
-          }
-        }
-
-        // Replace results array with RRF-merged results, sorted by combined score
         results.length = 0;
-        const merged = Array.from(rrfMap.values())
-          .sort((a, b) => b.score - a.score);
-        for (const { result } of merged) {
-          results.push(result);
+        for (const { rrfScore, ...rest } of fused) {
+          results.push(rest);
         }
       }
     } catch (e) {

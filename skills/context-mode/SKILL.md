@@ -31,7 +31,7 @@ Bash whitelist (safe to run directly):
 - **Package management**: `npm install`, `npm publish`, `pip install`
 - **Simple output**: `echo`, `printf`
 
-**Everything else → `ctx_execute` or `ctx_execute_file`.** Any command that reads, queries, fetches, lists, logs, tests, builds, diffs, inspects, or calls an external service. This includes ALL CLIs (gh, aws, kubectl, docker, terraform, wrangler, fly, heroku, gcloud, etc.).
+**Everything else -> `ctx_execute` or `ctx_execute_file`.** Any command that reads, queries, fetches, lists, logs, tests, builds, diffs, inspects, or calls an external service. This includes ALL CLIs (gh, aws, kubectl, docker, terraform, wrangler, fly, heroku, gcloud, etc.).
 
 **When uncertain, use context-mode.** Every KB of unnecessary context reduces the quality and speed of the entire session.
 
@@ -39,43 +39,40 @@ Bash whitelist (safe to run directly):
 
 ```
 About to run a command / read a file / call an API?
-│
-├── Command is on the Bash whitelist (file mutations, git writes, navigation, echo)?
-│   └── Use Bash
-│
-├── Output MIGHT be large or you're UNSURE?
-│   └── Use context-mode ctx_execute or ctx_execute_file
-│
-├── Fetching web documentation or HTML page?
-│   └── Use ctx_fetch_and_index → ctx_search
-│
-├── Using Playwright (navigate, snapshot, console, network)?
-│   └── ALWAYS use filename parameter to save to file, then:
-│       browser_snapshot(filename) → ctx_index(path) or ctx_execute_file(path)
-│       browser_console_messages(filename) → ctx_execute_file(path)
-│       browser_network_requests(filename) → ctx_execute_file(path)
-│       ⚠ browser_navigate returns a snapshot automatically — ignore it,
-│         use browser_snapshot(filename) for any inspection.
-│       ⚠ Playwright MCP uses a SINGLE browser instance — NOT parallel-safe.
-│         For parallel browser ops, use agent-browser via ctx_execute instead.
-│
-├── Using agent-browser (parallel-safe browser automation)?
-│   └── Run via ctx_execute (shell) — each call gets its own subprocess:
-│       ctx_execute({ language: "shell", code: "agent-browser open example.com && agent-browser snapshot -i -c" })
-│       ✓ Supports sessions for isolated browser instances
-│       ✓ Safe for parallel subagent execution
-│       ✓ Lightweight accessibility tree with ref-based interaction
-│
-├── Processing output from another MCP tool (Context7, GitHub API, etc.)?
-│   ├── Output already in context from a previous tool call?
-│   │   └── Use it directly. Do NOT re-index with ctx_index(content: ...).
-│   ├── Need to search the output multiple times?
-│   │   └── Save to file via ctx_execute, then ctx_index(path) → ctx_search
-│   └── One-shot extraction?
-│       └── Save to file via ctx_execute, then ctx_execute_file(path)
-│
-└── Reading a file to analyze/summarize (not edit)?
-    └── Use ctx_execute_file (file loads into FILE_CONTENT, not context)
+|
+|-- Command is on the Bash whitelist (file mutations, git writes, navigation, echo)?
+|   -- Use Bash
+|
+|-- Output MIGHT be large or you're UNSURE?
+|   -- Use context-mode ctx_execute or ctx_execute_file
+|
+|-- Fetching web documentation or HTML page?
+|   -- Use ctx_fetch_and_index -> ctx_search
+|
+|-- Using Playwright (navigate, snapshot, console, network)?
+|   -- ALWAYS use filename parameter to save to file, then:
+|       browser_snapshot(filename) -> ctx_index(path) or ctx_execute_file(path)
+|       browser_console_messages(filename) -> ctx_execute_file(path)
+|       browser_network_requests(filename) -> ctx_execute_file(path)
+|       browser_navigate returns a snapshot automatically -- ignore it,
+|         use browser_snapshot(filename) for any inspection.
+|       Playwright MCP uses a SINGLE browser instance -- NOT parallel-safe.
+|         For parallel browser ops, use agent-browser via ctx_execute instead.
+|
+|-- Using agent-browser (parallel-safe browser automation)?
+|   -- Run via ctx_execute (shell) -- each call gets its own subprocess:
+|       ctx_execute({ language: "shell", code: "agent-browser open example.com && agent-browser snapshot -i -c" })
+|
+|-- Processing output from another MCP tool (Context7, GitHub API, etc.)?
+|   |-- Output already in context from a previous tool call?
+|   |   -- Use it directly. Do NOT re-index with ctx_index(content: ...).
+|   |-- Need to search the output multiple times?
+|   |   -- Save to file via ctx_execute, then ctx_index(path) -> ctx_search
+|   -- One-shot extraction?
+|       -- Save to file via ctx_execute, then ctx_execute_file(path)
+|
+-- Reading a file to analyze/summarize (not edit)?
+    -- Use ctx_execute_file (file loads into FILE_CONTENT, not context)
 ```
 
 ## When to Use Each Tool
@@ -91,11 +88,11 @@ About to run a command / read a file / call an API?
 | Read a data file | `ctx_execute_file` | Analyze CSV, JSON, YAML, XML |
 | Read source code to analyze | `ctx_execute_file` | Count functions, find patterns, extract metrics |
 | Fetch web docs | `ctx_fetch_and_index` | Index React/Next.js/Zod docs, then search |
-| Playwright snapshot | `browser_snapshot(filename)` → `ctx_index(path)` → `ctx_search` | Save to file, index server-side, query |
-| Playwright snapshot (one-shot) | `browser_snapshot(filename)` → `ctx_execute_file(path)` | Save to file, extract in sandbox |
-| Playwright console/network | `browser_*(filename)` → `ctx_execute_file(path)` | Save to file, analyze in sandbox |
-| MCP output (already in context) | Use directly | Don't re-index — it's already loaded |
-| MCP output (need multi-query) | `ctx_execute` to save → `ctx_index(path)` → `ctx_search` | Save to file first, index server-side |
+| Playwright snapshot | `browser_snapshot(filename)` -> `ctx_index(path)` -> `ctx_search` | Save to file, index server-side, query |
+| Playwright snapshot (one-shot) | `browser_snapshot(filename)` -> `ctx_execute_file(path)` | Save to file, extract in sandbox |
+| Playwright console/network | `browser_*(filename)` -> `ctx_execute_file(path)` | Save to file, analyze in sandbox |
+| MCP output (already in context) | Use directly | Don't re-index -- it's already loaded |
+| MCP output (need multi-query) | `ctx_execute` to save -> `ctx_index(path)` -> `ctx_search` | Save to file first, index server-side |
 | Wipe indexed KB content | `ctx_purge(confirm: true)` | Permanently deletes all indexed content |
 
 ## Automatic Triggers
@@ -121,23 +118,33 @@ Use context-mode for ANY of these, without being asked:
 
 ## Search Query Strategy
 
-- BM25 uses **OR semantics** — results matching more terms rank higher automatically
+- BM25 uses **OR semantics** -- results matching more terms rank higher automatically
 - Use 2-4 specific technical terms per query
 - **Always use `source` parameter** when multiple docs are indexed to avoid cross-source contamination
   - Partial match works: `source: "Node"` matches `"Node.js v22 CHANGELOG"`
-- **Always use `queries` array** — batch ALL search questions in ONE call:
+- **Always use `queries` array** -- batch ALL search questions in ONE call:
   - `ctx_search(queries: ["transform pipe", "refine superRefine", "coerce codec"], source: "Zod")`
-  - NEVER make multiple separate ctx_search() calls — put all queries in one array
+  - NEVER make multiple separate ctx_search() calls -- put all queries in one array
 
 ## Critical Rules
 
-1. **Print analyzed findings, not raw data.** stdout is all that enters context. No output = wasted call. Don't `console.log(JSON.stringify(data))` — analyze first.
-2. **Be specific.** Bug IDs, line numbers, exact values — not just counts.
+1. **Print analyzed findings, not raw data.** stdout is all that enters context. No output = wasted call. Don't `console.log(JSON.stringify(data))` -- analyze first.
+2. **Be specific.** Bug IDs, line numbers, exact values -- not just counts.
 3. **For EDIT: use Read tool.** context-mode is for analysis, not editing.
-4. **Bash whitelist only.** File mutations, git writes, navigation, echo. Everything else → context-mode.
+4. **Bash whitelist only.** File mutations, git writes, navigation, echo. Everything else -> context-mode.
 5. **Never `ctx_index(content: large_data)`.** Use `ctx_index(path: ...)` to read server-side. The `content` parameter sends data through context.
-6. **Always use `filename` on Playwright.** `browser_snapshot`, `browser_console_messages`, `browser_network_requests` — without it, output floods context.
+6. **Always use `filename` on Playwright.** `browser_snapshot`, `browser_console_messages`, `browser_network_requests` -- without it, output floods context.
 7. **Don't re-index data already in context.** If an MCP tool returned data, use it directly or save to file first.
+
+## Platform-Specific Skills
+
+Context-mode integrates with multiple AI coding platforms via hooks. For platform-specific hook configuration, capabilities, and integration details, see:
+
+- [Claude Code](./SKILL-claude.md) -- Full hook support: PreToolUse, PostToolUse, PreCompact, SessionStart, UserPromptSubmit
+- [Codex CLI](./SKILL-codex.md) -- JSON stdin/stdout hooks, TOML config, limited arg modification
+- [Cursor](./SKILL-cursor.md) -- Native hooks with lower-camel names, project-scoped config
+- [Gemini CLI](./SKILL-gemini.md) -- BeforeTool/AfterTool hooks, advisory PreCompress
+- [VS Code Copilot](./SKILL-copilot.md) -- Extension-based, .github scoped hooks
 
 ## Reference Files
 

@@ -13,13 +13,15 @@ import {
   VERSION,
   _insightChild,
   closeStore,
-  resetVaultStore,
+} from "./tools/paths.js";
+import {
   persistStats,
   restoreStatsOnStartup,
   startVersionCheck,
   CM_FS_PRELOAD,
   writeFsPreload,
-} from "./tools/shared.js";
+} from "./tools/stats.js";
+import { resetVaultStore } from "./tools/vault-lifecycle.js";
 import { registerAllTools } from "./tools/register.js";
 
 // Prevent silent server death from unhandled async errors

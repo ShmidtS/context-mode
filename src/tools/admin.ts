@@ -14,27 +14,29 @@ import { join, dirname, resolve, basename, relative, isAbsolute } from "node:pat
 import { homedir, tmpdir, cpus, platform } from "node:os";
 import { execSync, spawn, type ChildProcess } from "node:child_process";
 import {
-  trackResponse,
-  trackIndexed,
-  sessionStats,
   getStore,
   resetStore,
-  resetVaultStore,
   getSessionDir,
   hashProjectDir,
   getWorktreeSuffix,
-  getStatsFilePath,
-  getLifetimeStats,
-  _latestVersion,
   _detectedAdapter,
   setDetectedAdapter,
   _insightChild,
   setInsightChild,
   __pkg_dir,
   VERSION,
-  classifyIp,
   type ToolResult,
-} from "./shared.js";
+} from "./paths.js";
+import {
+  trackResponse,
+  trackIndexed,
+  sessionStats,
+  getStatsFilePath,
+  getLifetimeStats,
+  _latestVersion,
+} from "./stats.js";
+import { classifyIp } from "./security-helpers.js";
+import { resetVaultStore } from "./vault-lifecycle.js";
 import { runPool, type PoolJob } from "../concurrency/runPool.js";
 import { composeFetchCacheKey } from "../fetch-cache.js";
 import { type IndexResult } from "../store.js";

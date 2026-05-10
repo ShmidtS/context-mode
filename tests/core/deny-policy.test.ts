@@ -17,7 +17,7 @@ import { describe, test, expect } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serverSrc = readFileSync(
-  resolve(__dirname, "../../src/tools/shared.ts"),
+  resolve(__dirname, "../../src/tools/security-helpers.ts"),
   "utf-8",
 );
 

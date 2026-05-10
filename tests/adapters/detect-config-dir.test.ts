@@ -68,7 +68,6 @@ describe("detectPlatform — config directory branches", () => {
   it.each<[string[], string]>([
     [[".config", "kilo"], "kilo"],
     [[".config", "opencode"], "opencode"],
-    [[".config", "zed"], "zed"],
     [[".config", "JetBrains"], "jetbrains-copilot"],
   ])("detects XDG ~/%s/%s → %s at medium confidence", (segs, expected) => {
     forceDir(resolve(home, ...segs));
@@ -151,12 +150,9 @@ describe("detectPlatform — env var priority chain", () => {
     expect(detectPlatform().platform).toBe("cursor");
   });
 
-  // ANTIGRAVITY + VSCODE: Antigravity is an Electron/VSCode fork — same pattern.
-  it("ANTIGRAVITY beats VSCODE when both envs are set (fork-collision)", () => {
-    process.env.ANTIGRAVITY_CLI_ALIAS = "agtg";
-    process.env.VSCODE_PID = "99";
-    expect(detectPlatform().platform).toBe("antigravity");
-  });
+  // ANTIGRAVITY: moved to experimental/ — env-var auto-detection removed.
+  // Only accessible via CONTEXT_MODE_PLATFORM override or MCP clientInfo.
+  // Antigravity clientInfo detection still works via client-map.
 
   // CURSOR + CODEX: cursor listed before codex — IDE-fork signal wins over
   // CLI tooling signal.

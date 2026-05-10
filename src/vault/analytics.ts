@@ -71,6 +71,32 @@ export interface AnalyzeOpts {
   questionLimit?: number;
 }
 
+/** Result from surprise score computation for a single node. */
+export interface SurpriseScoreResult {
+  id: number;
+  title: string;
+  path: string;
+  /** Composite surprise score. */
+  surprise: number;
+  /** Total degree (in + out). */
+  degree: number;
+  /** Edges connecting to nodes in different communities (different path prefix + tag set). */
+  crossCommunityEdges: number;
+  /** Edges connecting nodes of different file types (e.g. .md -> .ts). */
+  crossFileTypeEdges: number;
+  tags: string[];
+}
+
+/** Edge with source/target node info, filtered by confidence. */
+export interface ConfidenceFilteredEdge {
+  edgeId: number;
+  sourcePath: string;
+  targetPath: string | null;
+  edgeType: string;
+  confidence: "EXTRACTED" | "INFERRED" | "AMBIGUOUS";
+  context: string | null;
+}
+
 // ─────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────
@@ -352,4 +378,143 @@ export function analyzeGraph(
   ].join(" ");
 
   return { godNodes, surprisingConnections, communityHints, suggestedQuestions, summary };
+}
+
+// ─────────────────────────────────────────────────────────
+// Surprise score — composite metric for node importance
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Compute surprise scores for all nodes in the graph.
+ *
+ * Formula: surprise = degree * 0.3 + crossCommunityEdges * 0.4 + crossFileTypeEdges * 0.3
+ *
+ * - degree: total in + out degree (centrality)
+ * - crossCommunityEdges: edges where source and target have different path-module prefixes
+ *   and zero tag overlap
+ * - crossFileTypeEdges: edges where source and target have different file extensions
+ *
+ * Higher score = more "surprising" or important node.
+ */
+export function computeSurpriseScores(
+  store: VaultGraphStore,
+  limit: number = 20,
+): SurpriseScoreResult[] {
+  const allNodeIds = store.getAllNodeIds();
+  const allEdges = store.getAllEdges();
+
+  // Build reverse adjacency + out-adjacency for degree counting
+  const nodeData = new Map<number, {
+    degree: number;
+    crossCommunity: number;
+    crossFileType: number;
+    tags: string[];
+  }>();
+
+  for (const id of allNodeIds) {
+    nodeData.set(id, { degree: 0, crossCommunity: 0, crossFileType: 0, tags: getNodeTags(store, id) });
+  }
+
+  for (const edge of allEdges) {
+    if (edge.target_id === null) continue;
+
+    // Count degree for both source and target
+    const src = nodeData.get(edge.source_id);
+    const tgt = nodeData.get(edge.target_id);
+    if (src) src.degree++;
+    if (tgt) tgt.degree++;
+
+    // Cross-community check: different path-module prefix AND zero tag overlap
+    const sourceNode = store.getNodeById(edge.source_id);
+    const targetNode = store.getNodeById(edge.target_id);
+    if (sourceNode && targetNode) {
+      const srcPrefix = pathModulePrefix(sourceNode.note_path);
+      const tgtPrefix = pathModulePrefix(targetNode.note_path);
+      const srcTags = nodeData.get(edge.source_id)?.tags ?? [];
+      const tgtTags = nodeData.get(edge.target_id)?.tags ?? [];
+      const tagsOverlap = tagSimilarity(srcTags, tgtTags) > 0;
+
+      if (srcPrefix !== tgtPrefix && !tagsOverlap) {
+        if (src) src.crossCommunity++;
+        if (tgt) tgt.crossCommunity++;
+      }
+
+      // Cross-file-type check: different extensions
+      const srcExt = getExtension(sourceNode.note_path);
+      const tgtExt = getExtension(targetNode.note_path);
+      if (srcExt !== tgtExt) {
+        if (src) src.crossFileType++;
+        if (tgt) tgt.crossFileType++;
+      }
+    }
+  }
+
+  const results: SurpriseScoreResult[] = [];
+  for (const id of allNodeIds) {
+    const data = nodeData.get(id);
+    if (!data) continue;
+    const node = store.getNodeById(id);
+    if (!node) continue;
+
+    const surprise = data.degree * 0.3 + data.crossCommunity * 0.4 + data.crossFileType * 0.3;
+    results.push({
+      id,
+      title: node.title,
+      path: node.note_path,
+      surprise,
+      degree: data.degree,
+      crossCommunityEdges: data.crossCommunity,
+      crossFileTypeEdges: data.crossFileType,
+      tags: data.tags,
+    });
+  }
+
+  results.sort((a, b) => b.surprise - a.surprise);
+  return results.slice(0, limit);
+}
+
+/**
+ * Filter edges by confidence threshold, returning edges with context.
+ *
+ * Confidence mapping: EXTRACTED=1.0, INFERRED=0.7, AMBIGUOUS=0.5.
+ * Only edges with confidence >= minConfidence are returned.
+ */
+export function filterEdgesByConfidence(
+  store: VaultGraphStore,
+  minConfidence: number = 0.0,
+): ConfidenceFilteredEdge[] {
+  const confidenceValue: Record<string, number> = {
+    EXTRACTED: 1.0,
+    INFERRED: 0.7,
+    AMBIGUOUS: 0.5,
+  };
+
+  const allEdges = store.getAllEdges();
+  const results: ConfidenceFilteredEdge[] = [];
+
+  for (const edge of allEdges) {
+    const value = confidenceValue[edge.confidence] ?? 1.0;
+    if (value < minConfidence) continue;
+
+    const source = store.getNodeById(edge.source_id);
+    const target = edge.target_id ? store.getNodeById(edge.target_id) : null;
+
+    results.push({
+      edgeId: edge.id,
+      sourcePath: source?.note_path ?? "",
+      targetPath: target?.note_path ?? null,
+      edgeType: edge.edge_type,
+      confidence: edge.confidence,
+      context: edge.context,
+    });
+  }
+
+  return results;
+}
+
+/** Extract file extension from a path. */
+function getExtension(path: string): string {
+  const lastDot = path.lastIndexOf(".");
+  if (lastDot === -1) return "";
+  return path.substring(lastDot);
 }

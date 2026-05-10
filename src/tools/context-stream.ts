@@ -4,7 +4,10 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from 'zod'
-import { trackResponse, getStore, acquireVaultStores, toolErrorResponse, getProjectDir, _detectedAdapter, classifyIp } from './shared.js'
+import { getStore, getProjectDir, _detectedAdapter, toolErrorResponse } from './paths.js'
+import { trackResponse } from './stats.js'
+import { classifyIp } from './security-helpers.js'
+import { acquireVaultStores } from './vault-lifecycle.js'
 import { searchAllSources } from '../search/unified.js'
 import { ContextPacker } from '../search/context-packer.js'
 import { VectorStore } from '../search/vector-store.js'

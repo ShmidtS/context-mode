@@ -8,17 +8,17 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
-  trackResponse,
   getStore,
   getSessionDir,
   hashProjectDir,
-  extractSnippet,
-  coerceJsonArray,
-  acquireVaultStores,
   getProjectDir,
   _detectedAdapter,
   type ToolResult,
-} from "./shared.js";
+} from "./paths.js";
+import { trackResponse } from "./stats.js";
+import { extractSnippet } from "./snippet.js";
+import { coerceJsonArray } from "./batch-helpers.js";
+import { acquireVaultStores } from "./vault-lifecycle.js";
 import { getWorktreeSuffix, SessionDB } from "../session/db.js";
 import { searchAllSources, type UnifiedSearchResult } from "../search/unified.js";
 
@@ -176,6 +176,12 @@ export function registerCtxIndex(
           .min(100)
           .optional()
           .describe("Token budget for packed context output. When provided, response includes packing note."),
+        minConfidence: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("Minimum confidence threshold (0-1). Filter out results below this value."),
       }),
     },
     async (params) => {
@@ -214,7 +220,7 @@ export function registerCtxIndex(
           });
         }
 
-        const { limit = 3, source, contentType, tokenBudget } = params as { limit?: number; source?: string; contentType?: "code" | "prose"; tokenBudget?: number };
+        const { limit = 3, source, contentType, tokenBudget, minConfidence } = params as { limit?: number; source?: string; contentType?: "code" | "prose"; tokenBudget?: number; minConfidence?: number };
 
         const now = Date.now();
         if (now - searchWindowStart > SEARCH_WINDOW_MS) {
@@ -296,6 +302,11 @@ export function registerCtxIndex(
               vaultStore,
               vaultSearch,
             });
+          }
+
+          // Apply minConfidence filter if specified
+          if (minConfidence !== undefined) {
+            results = results.filter((r) => (r.confidence ?? 0) >= minConfidence);
           }
 
           if (results.length === 0) {

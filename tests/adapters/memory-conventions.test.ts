@@ -22,8 +22,8 @@ import { CursorAdapter } from "../../src/adapters/cursor/index.js";
 import { VSCodeCopilotAdapter } from "../../src/adapters/vscode-copilot/index.js";
 import { JetBrainsCopilotAdapter } from "../../src/adapters/jetbrains-copilot/index.js";
 import { KiroAdapter } from "../../src/adapters/kiro/index.js";
-import { ZedAdapter } from "../../src/adapters/zed/index.js";
-import { AntigravityAdapter } from "../../src/adapters/antigravity/index.js";
+import { ZedAdapter } from "../../src/adapters/experimental/zed/index.js";
+import { AntigravityAdapter } from "../../src/adapters/experimental/antigravity/index.js";
 import { OpenClawAdapter } from "../../src/adapters/openclaw/index.js";
 
 // ── Home-rooted adapter specs ─────────────────────────────

@@ -1650,7 +1650,7 @@ describe("ctx_purge is the sole reset/wipe mechanism", () => {
 
 describe("Platform-aware session paths via adapter", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/tools/shared.ts"),
+    resolve(__dirname, "../../src/tools/paths.ts"),
     "utf-8",
   );
 
@@ -1731,7 +1731,7 @@ describe("Platform-aware session paths via adapter", () => {
 
 describe("Project dir hash consistency", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/tools/shared.ts"),
+    resolve(__dirname, "../../src/tools/paths.ts"),
     "utf-8",
   );
 
@@ -1921,7 +1921,7 @@ describe("ContentStore purge behavior", () => {
 
 describe("Version outdated warning in trackResponse", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/tools/shared.ts"),
+    resolve(__dirname, "../../src/tools/stats.ts"),
     "utf-8",
   );
 
@@ -2004,8 +2004,12 @@ describe("FS read instrumentation", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("batch_execute FS read tracking", () => {
-  const sharedSrc = readFileSync(
-    resolve(__dirname, "../../src/tools/shared.ts"),
+  const statsSrc = readFileSync(
+    resolve(__dirname, "../../src/tools/stats.ts"),
+    "utf-8",
+  );
+  const batchHelpersSrc = readFileSync(
+    resolve(__dirname, "../../src/tools/batch-helpers.ts"),
     "utf-8",
   );
   const batchSrc = readFileSync(
@@ -2018,10 +2022,10 @@ describe("batch_execute FS read tracking", () => {
   );
 
   test("creates CM_FS_PRELOAD temp file with FS tracking script", async () => {
-    expect(sharedSrc).toContain("CM_FS_PRELOAD");
-    expect(sharedSrc).toContain("cm-fs-preload-");
+    expect(statsSrc).toContain("CM_FS_PRELOAD");
+    expect(statsSrc).toContain("cm-fs-preload-");
     // Preload script must write __CM_FS__ marker to stderr on exit
-    expect(sharedSrc).toMatch(/writeFileSync\(\s*CM_FS_PRELOAD/);
+    expect(statsSrc).toMatch(/writeFileSync\(\s*CM_FS_PRELOAD/);
   });
 
   test("sets NODE_OPTIONS with --require for batch commands", async () => {
@@ -2030,14 +2034,14 @@ describe("batch_execute FS read tracking", () => {
   });
 
   test("parses __CM_FS__ from batch output and updates bytesSandboxed", async () => {
-    expect(sharedSrc).toContain("/__CM_FS__:(\\d+)/g");
+    expect(batchHelpersSrc).toContain("/__CM_FS__:(\\d+)/g");
     // Handler wires the FS-bytes callback to sessionStats; the runner strips/parses.
     expect(batchSrc).toContain("sessionStats.bytesSandboxed += totalFsBytes");
-    expect(sharedSrc).toContain("onFsBytes?.(cmdFsBytes)");
+    expect(batchHelpersSrc).toContain("onFsBytes?.(cmdFsBytes)");
   });
 
   test("strips __CM_FS__ markers from batch command output", async () => {
-    expect(sharedSrc).toContain('output.replace(/__CM_FS__:\\d+\\n?/g, "")');
+    expect(batchHelpersSrc).toContain('output.replace(/__CM_FS__:\\d+\\n?/g, "")');
   });
 
   test("cleans up preload file on shutdown", async () => {
@@ -2921,7 +2925,7 @@ describe("getSessionDirSegments — sync platform → segments map", () => {
 
 describe("getSessionDir uses pre-detection when adapter not yet detected", () => {
   const serverSrc = readFileSync(
-    resolve(__dirname, "../../src/tools/shared.ts"),
+    resolve(__dirname, "../../src/tools/paths.ts"),
     "utf-8",
   );
 

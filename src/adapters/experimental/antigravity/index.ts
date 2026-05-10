@@ -23,11 +23,11 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
-import { McpOnlyBaseAdapter } from "../mcp-only-base.js";
+import { McpOnlyBaseAdapter } from "../../mcp-only-base.js";
 
 import type {
   DiagnosticResult,
-} from "../types.js";
+} from "../../types.js";
 
 // ─────────────────────────────────────────────────────────
 // Adapter implementation

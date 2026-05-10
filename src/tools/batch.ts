@@ -5,20 +5,16 @@
 import { z } from "zod";
 import { Buffer } from "node:buffer";
 import { cpus } from "node:os";
+import { getStore } from "./paths.js";
+import { trackResponse, trackIndexed, sessionStats, CM_FS_PRELOAD } from "./stats.js";
 import {
-  trackResponse,
-  trackIndexed,
-  sessionStats,
-  getStore,
-  CM_FS_PRELOAD,
-  extractSnippet,
   formatBatchQueryResults,
   buildBatchNodeOptionsPrefix,
   runBatchCommands,
   coerceCommandsArray,
   coerceJsonArray,
   type BatchCommand,
-} from "./shared.js";
+} from "./batch-helpers.js";
 import { type PolyglotExecutor } from "../executor.js";
 
 export function registerCtxBatchExecute(

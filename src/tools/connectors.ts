@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────
 
 import { z } from 'zod'
-import { trackResponse } from './shared.js'
+import { trackResponse } from './stats.js'
 
 // In-memory connector registry (Phase 1 stub)
 const connectors: Array<{

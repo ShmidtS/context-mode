@@ -2,7 +2,7 @@ import "../setup-home";
 import { it, expect } from "vitest";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { AntigravityAdapter } from "../../src/adapters/antigravity/index.js";
+import { AntigravityAdapter } from "../../src/adapters/experimental/antigravity/index.js";
 import { testMcpOnlyAdapter } from "../shared/adapter-harness.js";
 
 testMcpOnlyAdapter({

@@ -7,7 +7,7 @@ import { OpenClawAdapter } from "../../src/adapters/openclaw/index.js";
 import { CodexAdapter } from "../../src/adapters/codex/index.js";
 import { VSCodeCopilotAdapter } from "../../src/adapters/vscode-copilot/index.js";
 import { CursorAdapter } from "../../src/adapters/cursor/index.js";
-import { AntigravityAdapter } from "../../src/adapters/antigravity/index.js";
+import { AntigravityAdapter } from "../../src/adapters/experimental/antigravity/index.js";
 import { KiroAdapter } from "../../src/adapters/kiro/index.js";
 import { QwenCodeAdapter } from "../../src/adapters/qwen-code/index.js";
 import { JetBrainsCopilotAdapter } from "../../src/adapters/jetbrains-copilot/index.js";
@@ -65,9 +65,6 @@ const envDetectionSpecs: EnvDetectionSpec[] = [
   { desc: "cursor when CURSOR_CLI is set", envVars: { CURSOR_CLI: "1" }, expectedPlatform: "cursor" },
   { desc: "vscode-copilot when VSCODE_PID is set", envVars: { VSCODE_PID: "12345" }, expectedPlatform: "vscode-copilot" },
   { desc: "vscode-copilot when VSCODE_CWD is set", envVars: { VSCODE_CWD: "/some/dir" }, expectedPlatform: "vscode-copilot" },
-  { desc: "antigravity via ANTIGRAVITY_CLI_ALIAS", envVars: { ANTIGRAVITY_CLI_ALIAS: "agtg" }, expectedPlatform: "antigravity" },
-  { desc: "zed via ZED_SESSION_ID", envVars: { ZED_SESSION_ID: "01HZED-uuid" }, expectedPlatform: "zed" },
-  { desc: "zed via ZED_TERM", envVars: { ZED_TERM: "true" }, expectedPlatform: "zed" },
   { desc: "pi via PI_PROJECT_DIR", envVars: { PI_PROJECT_DIR: "/some/project" }, expectedPlatform: "pi" },
   { desc: "jetbrains-copilot via IDEA_INITIAL_DIRECTORY", envVars: { IDEA_INITIAL_DIRECTORY: "/home/user/project" }, expectedPlatform: "jetbrains-copilot" },
   { desc: "qwen-code via QWEN_PROJECT_DIR", envVars: { QWEN_PROJECT_DIR: "/some/project" }, expectedPlatform: "qwen-code" },

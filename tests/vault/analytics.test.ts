@@ -7,7 +7,7 @@
  */
 
 import { describe, test, expect } from "vitest";
-import { analyzeGraph } from "../../src/vault/analytics.js";
+import { analyzeGraph, computeSurpriseScores, filterEdgesByConfidence } from "../../src/vault/analytics.js";
 import type { VaultNode, VaultEdge, VaultTag } from "../../src/types.js";
 
 // -- Helpers ---------------------------------------------------------------
@@ -341,5 +341,186 @@ describe("analyzeGraph", () => {
     expect(result.summary).toContain("A");
     // Summary mentions surprising connection count
     expect(result.summary).toContain("surprising");
+  });
+});
+
+describe("computeSurpriseScores", () => {
+  test("returns empty for empty store", () => {
+    const store = mockStore([], [], new Map());
+    const result = computeSurpriseScores(store as any);
+    expect(result).toEqual([]);
+  });
+
+  test("nodes with cross-community edges score higher than isolated nodes", () => {
+    // Node A: frontend component linking to backend handler (cross-community)
+    const a = makeNode(1, "Frontend", "frontend/ui/app.md", 2, 1);
+    const b = makeNode(2, "Backend", "backend/api/handler.md", 1, 0);
+    const c = makeNode(3, "Leaf", "frontend/ui/leaf.md", 0, 0);
+
+    const edges = [makeEdge(1, 1, 2, "wikilink")]; // cross-module, no tag overlap
+    const tags = new Map([[1, ["frontend"]], [2, ["backend"]], [3, ["frontend"]]]);
+
+    const result = computeSurpriseScores(
+      mockStore([a, b, c], edges, tags) as any,
+    );
+
+    expect(result.length).toBe(3);
+    // Node 1 (Frontend) has cross-community edge to node 2, should score highest
+    expect(result[0].id).toBe(1);
+    expect(result[0].crossCommunityEdges).toBeGreaterThanOrEqual(1);
+    expect(result[0].surprise).toBeGreaterThan(0);
+    // Leaf (no edges) should be last
+    const leaf = result.find((r) => r.id === 3);
+    expect(leaf).toBeDefined();
+    expect(leaf!.surprise).toBe(0);
+  });
+
+  test("cross-file-type edges contribute to surprise score", () => {
+    const md = makeNode(1, "Readme", "docs/readme.md", 0, 1);
+    const ts = makeNode(2, "Index", "src/index.ts", 1, 0);
+
+    // Same module prefix "docs" vs "src", but different extensions
+    const edges = [makeEdge(1, 1, 2, "reference")];
+    const tags = new Map([[1, ["docs"]], [2, ["code"]]]);
+
+    const result = computeSurpriseScores(
+      mockStore([md, ts], edges, tags) as any,
+    );
+
+    // Both should have crossFileTypeEdges > 0
+    const mdResult = result.find((r) => r.id === 1);
+    const tsResult = result.find((r) => r.id === 2);
+    expect(mdResult!.crossFileTypeEdges).toBeGreaterThanOrEqual(1);
+    expect(tsResult!.crossFileTypeEdges).toBeGreaterThanOrEqual(1);
+  });
+
+  test("respects limit parameter", () => {
+    const nodes = [
+      makeNode(1, "A", "mod-a/a.md", 2, 1),
+      makeNode(2, "B", "mod-b/b.md", 1, 0),
+      makeNode(3, "C", "mod-c/c.md", 0, 0),
+    ];
+    const edges = [makeEdge(1, 1, 2)];
+    const tags = new Map([[1, ["a"]], [2, ["b"]], [3, ["c"]]]);
+
+    const result = computeSurpriseScores(
+      mockStore(nodes, edges, tags) as any,
+      2,
+    );
+
+    expect(result).toHaveLength(2);
+  });
+
+  test("same-module same-tag edges do not count as cross-community", () => {
+    const a = makeNode(1, "A", "same/mod/a.md", 0, 1);
+    const b = makeNode(2, "B", "same/mod/b.md", 1, 0);
+
+    const edges = [makeEdge(1, 1, 2)];
+    const tags = new Map([[1, ["shared"]], [2, ["shared"]]]);
+
+    const result = computeSurpriseScores(
+      mockStore([a, b], edges, tags) as any,
+    );
+
+    const aResult = result.find((r) => r.id === 1);
+    expect(aResult!.crossCommunityEdges).toBe(0);
+  });
+});
+
+describe("filterEdgesByConfidence", () => {
+  function makeEdgeWithConfidence(
+    id: number,
+    sourceId: number,
+    targetId: number | null,
+    confidence: "EXTRACTED" | "INFERRED" | "AMBIGUOUS",
+    edgeType = "wikilink",
+  ): VaultEdge {
+    return {
+      id,
+      source_id: sourceId,
+      target_id: targetId,
+      target_name: "",
+      alias: null,
+      line_number: null,
+      context: `context-${id}`,
+      edge_type: edgeType,
+      confidence,
+    };
+  }
+
+  test("returns all edges when minConfidence is 0", () => {
+    const a = makeNode(1, "A", "a.md", 0, 0);
+    const b = makeNode(2, "B", "b.md", 0, 0);
+
+    const edges = [
+      makeEdgeWithConfidence(1, 1, 2, "EXTRACTED"),
+      makeEdgeWithConfidence(2, 2, 1, "INFERRED"),
+      makeEdgeWithConfidence(3, 1, null, "AMBIGUOUS"),
+    ];
+
+    const store = mockStore([a, b], edges, new Map());
+    const result = filterEdgesByConfidence(store as any, 0);
+
+    expect(result).toHaveLength(3);
+  });
+
+  test("filters out AMBIGUOUS when minConfidence is 0.6", () => {
+    const a = makeNode(1, "A", "a.md", 0, 0);
+    const b = makeNode(2, "B", "b.md", 0, 0);
+
+    const edges = [
+      makeEdgeWithConfidence(1, 1, 2, "EXTRACTED"),
+      makeEdgeWithConfidence(2, 2, 1, "INFERRED"),
+      makeEdgeWithConfidence(3, 1, null, "AMBIGUOUS"),
+    ];
+
+    const store = mockStore([a, b], edges, new Map());
+    const result = filterEdgesByConfidence(store as any, 0.6);
+
+    expect(result).toHaveLength(2);
+    const confidences = result.map((r) => r.confidence);
+    expect(confidences).not.toContain("AMBIGUOUS");
+  });
+
+  test("returns only EXTRACTED when minConfidence is 0.8", () => {
+    const a = makeNode(1, "A", "a.md", 0, 0);
+    const b = makeNode(2, "B", "b.md", 0, 0);
+
+    const edges = [
+      makeEdgeWithConfidence(1, 1, 2, "EXTRACTED"),
+      makeEdgeWithConfidence(2, 2, 1, "INFERRED"),
+      makeEdgeWithConfidence(3, 1, null, "AMBIGUOUS"),
+    ];
+
+    const store = mockStore([a, b], edges, new Map());
+    const result = filterEdgesByConfidence(store as any, 0.8);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].confidence).toBe("EXTRACTED");
+  });
+
+  test("returns empty for minConfidence > 1.0", () => {
+    const a = makeNode(1, "A", "a.md", 0, 0);
+    const b = makeNode(2, "B", "b.md", 0, 0);
+
+    const edges = [makeEdgeWithConfidence(1, 1, 2, "EXTRACTED")];
+    const store = mockStore([a, b], edges, new Map());
+    const result = filterEdgesByConfidence(store as any, 1.1);
+
+    expect(result).toHaveLength(0);
+  });
+
+  test("includes source and target paths in results", () => {
+    const a = makeNode(1, "A", "path/to/a.md", 0, 0);
+    const b = makeNode(2, "B", "path/to/b.md", 0, 0);
+
+    const edges = [makeEdgeWithConfidence(1, 1, 2, "EXTRACTED")];
+    const store = mockStore([a, b], edges, new Map());
+    const result = filterEdgesByConfidence(store as any, 0);
+
+    expect(result[0].sourcePath).toBe("path/to/a.md");
+    expect(result[0].targetPath).toBe("path/to/b.md");
+    expect(result[0].edgeType).toBe("wikilink");
+    expect(result[0].context).toBe("context-1");
   });
 });

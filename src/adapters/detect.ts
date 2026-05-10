@@ -35,10 +35,7 @@ export const PLATFORM_ENV_VARS = [
   // detection works. Every entry verified against platform's own runtime
   // source code (PR #376 follow-up: full audit, May 2026 — see git blame).
   ["claude-code",        ["CLAUDE_PROJECT_DIR", "CLAUDE_SESSION_ID"]],
-  // antigravity (Electron/VSCode fork) — google-gemini/gemini-cli
-  // packages/core/src/ide/detect-ide.ts checks ANTIGRAVITY_CLI_ALIAS as the
-  // canonical Antigravity marker. Listed before vscode-copilot.
-  ["antigravity",        ["ANTIGRAVITY_CLI_ALIAS"]],
+  // antigravity — moved to experimental/ (MCP-only stub, no tests)
   // cursor (VSCode fork) — listed before vscode-copilot. CURSOR_TRACE_ID has
   // 800+ hits in major OSS detection libs (Vercel Next.js, Bun, Google
   // gemini-cli, Nx, CrewAI).
@@ -50,9 +47,7 @@ export const PLATFORM_ENV_VARS = [
   // opencode — sst/opencode packages/opencode/src/index.ts:108-109 sets
   // OPENCODE=1 + OPENCODE_PID=<pid> on every CLI invocation.
   ["opencode",           ["OPENCODE", "OPENCODE_PID"]],
-  // zed — zed-industries/zed crates/terminal/src/terminal.rs sets ZED_TERM=true
-  // in `insert_zed_terminal_env()`. Google's gemini-cli uses ZED_SESSION_ID.
-  ["zed",                ["ZED_SESSION_ID", "ZED_TERM"]],
+  // zed — moved to experimental/ (MCP-only stub, no tests)
   // codex — openai/codex codex-rs/core/src/exec_env.rs sets CODEX_THREAD_ID
   // per exec; unified_exec/process_manager.rs sets CODEX_CI in CI mode.
   ["codex",              ["CODEX_THREAD_ID", "CODEX_CI"]],
@@ -253,14 +248,6 @@ export function detectPlatform(clientInfo?: { name: string; version?: string }):
     };
   }
 
-  if (existsSync(resolve(home, ".config", "zed"))) {
-    return {
-      platform: "zed",
-      confidence: "medium",
-      reason: "~/.config/zed/ directory exists",
-    };
-  }
-
   // ── Low confidence: fallback ───────────────────────────
 
   return {
@@ -320,7 +307,7 @@ export async function getAdapter(platform?: PlatformId): Promise<HookAdapter> {
     }
 
     case "antigravity": {
-      const { AntigravityAdapter } = await import("./antigravity/index.js");
+      const { AntigravityAdapter } = await import("./experimental/antigravity/index.js");
       return new AntigravityAdapter();
     }
 
@@ -330,7 +317,7 @@ export async function getAdapter(platform?: PlatformId): Promise<HookAdapter> {
     }
 
     case "zed": {
-      const { ZedAdapter } = await import("./zed/index.js");
+      const { ZedAdapter } = await import("./experimental/zed/index.js");
       return new ZedAdapter();
     }
 

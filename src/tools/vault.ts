@@ -5,14 +5,14 @@
 import { z } from "zod";
 import { existsSync, statSync } from "node:fs";
 import { resolve, isAbsolute } from "node:path";
+import { type ToolResult } from "./paths.js";
+import { trackResponse } from "./stats.js";
 import {
-  trackResponse,
   getSharedVaultStore,
   isProjectVaultEmpty,
-  type ToolResult,
-} from "./shared.js";
+} from "./vault-lifecycle.js";
 import { loadDatabase } from "../db-base.js";
-import { analyzeGraph } from "../vault/analytics.js";
+import { analyzeGraph, computeSurpriseScores, filterEdgesByConfidence } from "../vault/analytics.js";
 
 export function registerVaultTools(
   server: import("@modelcontextprotocol/sdk/server/mcp.js").McpServer,
@@ -129,15 +129,18 @@ export function registerVaultTools(
         "Modes:\n" +
         "  - neighbors: find notes within N hops of a given note\n" +
         "  - backlinks: find all notes that link to a given note\n" +
-        "  - tag-cluster: find all notes sharing a given tag",
+        "  - tag-cluster: find all notes sharing a given tag\n" +
+        "  - surprises: find top N nodes by composite surprise score (cross-community + cross-file-type + centrality)\n" +
+        "  - confidence-filter: filter edges by minimum confidence threshold (0.0-1.0)",
       inputSchema: z.object({
-        mode: z.enum(["neighbors", "backlinks", "tag-cluster"]).describe("Graph traversal mode"),
+        mode: z.enum(["neighbors", "backlinks", "tag-cluster", "surprises", "confidence-filter"]).describe("Graph traversal mode"),
         nodePath: z.string().optional().describe("Note path (relative to vault root). Required for neighbors/backlinks."),
         tag: z.string().optional().describe("Tag to search. Required for tag-cluster."),
         vaultPath: z.string().optional().describe("Vault path (required when multiple vaults are indexed)"),
         maxHops: z.number().min(1).max(5).optional().default(1).describe("Max hops for neighbor traversal"),
         limit: z.number().min(1).max(100).optional().default(20).describe("Max results"),
         edgeType: z.string().optional().describe("Filter edges by type: wikilink, embed, markdown, calls, inherits, implements, type-ref, decorates"),
+        minConfidence: z.number().min(0).max(1).optional().default(0).describe("Minimum confidence threshold (0.0-1.0) for confidence-filter mode. EXTRACTED=1.0, INFERRED=0.7, AMBIGUOUS=0.5"),
       }),
     },
     async (args) => {
@@ -175,6 +178,16 @@ export function registerVaultTools(
           results = search.backlinks(node.id, args.edgeType).slice(0, args.limit);
         } else if (args.mode === "tag-cluster" && args.tag) {
           results = search.tagCluster(args.tag).slice(0, args.limit);
+        } else if (args.mode === "surprises") {
+          const surpriseResults = computeSurpriseScores(store, args.limit);
+          return trackResponse("ctx_vault_graph", {
+            content: [{ type: "text" as const, text: JSON.stringify(surpriseResults, null, 2) }],
+          });
+        } else if (args.mode === "confidence-filter") {
+          const filtered = filterEdgesByConfidence(store, args.minConfidence);
+          return trackResponse("ctx_vault_graph", {
+            content: [{ type: "text" as const, text: JSON.stringify(filtered.slice(0, args.limit), null, 2) }],
+          });
         } else {
           return trackResponse("ctx_vault_graph", {
             content: [{ type: "text" as const, text: "Invalid mode or missing required parameter" }],
