@@ -279,6 +279,9 @@ export interface HookAdapter {
   /** Configure all hooks for this platform. Returns change descriptions. */
   configureAllHooks(pluginRoot: string): string[];
 
+  /** Register the context-mode MCP server in platform-specific MCP config (if applicable). Returns change descriptions. */
+  configureMcpServer(pluginRoot: string): string[];
+
   /** Backup platform settings before modification. Returns backup path or null. */
   backupSettings(): string | null;
 

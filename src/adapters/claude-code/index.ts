@@ -190,6 +190,9 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
       fix: hasSessionStart ? undefined : "context-mode upgrade",
     });
 
+    // Check MCP server registration
+    results.push(this.checkMcpServersRegistration("~/.claude/settings.json"));
+
     return results;
   }
 
@@ -481,6 +484,35 @@ export class ClaudeCodeAdapter extends ClaudeCodeBaseAdapter implements HookAdap
     settings.hooks = hooks;
     this.writeSettings(settings);
     return changes;
+  }
+
+  configureMcpServer(pluginRoot: string): string[] {
+    const settings = this.readSettings() ?? {};
+    const mcpServers = (settings.mcpServers ?? {}) as Record<string, unknown>;
+    const safeNode = process.execPath.replace(/\\/g, "/");
+    const safeRoot = pluginRoot.replace(/\\/g, "/");
+    const entry = {
+      command: safeNode,
+      args: [`${safeRoot}/start.mjs`],
+    };
+    const existing = mcpServers["context-mode"] as
+      | Record<string, unknown>
+      | undefined;
+    if (
+      existing &&
+      existing.command === entry.command &&
+      Array.isArray(existing.args) &&
+      existing.args.length === entry.args.length &&
+      existing.args[0] === entry.args[0]
+    ) {
+      return [];
+    }
+    mcpServers["context-mode"] = entry;
+    settings.mcpServers = mcpServers;
+    this.writeSettings(settings);
+    return existing
+      ? ["Updated context-mode mcpServers entry in ~/.claude/settings.json"]
+      : ["Added context-mode to mcpServers in ~/.claude/settings.json"];
   }
 
   setHookPermissions(pluginRoot: string): string[] {

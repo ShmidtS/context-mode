@@ -181,6 +181,13 @@ export abstract class BaseAdapter {
   }
 
   /**
+   * Default: no-op — platforms that support MCP server registration override this.
+   */
+  configureMcpServer(_pluginRoot: string): string[] {
+    return [];
+  }
+
+  /**
    * Default: mkdirSync dirname + writeFileSync JSON.
    * Override for: copilot-base (different dir), qwen-code (require-based),
    * codex (TOML no-op), cursor (project dir mkdir), gemini-cli (homedir mkdir).

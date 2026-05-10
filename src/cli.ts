@@ -1074,6 +1074,18 @@ function upgradeConfigureHooks(
   p.log.success(
     color.green("Hooks configured") + color.dim(` — ${adapter.name}`),
   );
+
+  const mcpChanges = adapter.configureMcpServer(pluginRoot);
+  if (mcpChanges.length > 0) {
+    p.log.step(`Registering ${adapter.name} MCP server...`);
+    for (const change of mcpChanges) {
+      p.log.info(color.dim(`  ${change}`));
+      changes.push(change);
+    }
+    p.log.success(
+      color.green("MCP server registered") + color.dim(` — ${adapter.name}`),
+    );
+  }
 }
 
 function upgradeSetPermissions(

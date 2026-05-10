@@ -12,6 +12,7 @@
 
 import {
   readFileSync,
+  writeFileSync,
   mkdirSync,
   accessSync,
   existsSync,
@@ -265,5 +266,39 @@ export class VSCodeCopilotAdapter extends CopilotBaseAdapter {
       return contextMode.version;
     }
     return "not installed";
+  }
+
+  configureMcpServer(pluginRoot: string): string[] {
+    const mcpPath = resolve(".vscode", "mcp.json");
+    let settings: Record<string, unknown> = {};
+    try {
+      settings = JSON.parse(readFileSync(mcpPath, "utf-8")) as Record<string, unknown>;
+    } catch { /* best effort */ }
+    const servers = (settings.servers ?? {}) as Record<string, unknown>;
+    const safeNode = process.execPath.replace(/\\/g, "/");
+    const safeRoot = pluginRoot.replace(/\\/g, "/");
+    const entry = {
+      command: safeNode,
+      args: [`${safeRoot}/start.mjs`],
+    };
+    const existing = servers["context-mode"] as
+      | Record<string, unknown>
+      | undefined;
+    if (
+      existing &&
+      existing.command === entry.command &&
+      Array.isArray(existing.args) &&
+      existing.args.length === entry.args.length &&
+      existing.args[0] === entry.args[0]
+    ) {
+      return [];
+    }
+    servers["context-mode"] = entry;
+    settings.servers = servers;
+    mkdirSync(resolve(".vscode"), { recursive: true });
+    writeFileSync(mcpPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return existing
+      ? ["Updated context-mode server in .vscode/mcp.json"]
+      : ["Added context-mode server to .vscode/mcp.json"];
   }
 }
