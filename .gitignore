@@ -25,3 +25,6 @@ context-mode-guidance-*/
 /.kilo/
 .omc/
 .github/context-mode/
+meta.json
+bench-analytics.ts
+test-analytics.mjs
