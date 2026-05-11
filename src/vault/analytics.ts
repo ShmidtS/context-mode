@@ -6,6 +6,9 @@
  *   - Surprising connections: cross-module / cross-tag links
  *   - Suggested questions: auto-generated from graph structure
  *   - Community hints: edge-density clustering without external deps
+ *
+ * PERFORMANCE: all computations run on an in-memory snapshot built from
+ * the store in a single batch (3 SQLite queries). No N+1 per-edge lookups.
  */
 
 import type { VaultGraphStore } from "./graph-store.js";
@@ -34,6 +37,8 @@ export interface SurprisingConnection {
   sourceTags: string[];
   targetTags: string[];
   context: string | null;
+  /** Human-readable explanation of why this connection is surprising. */
+  explanation?: string;
 }
 
 export interface CommunityHint {
@@ -52,12 +57,22 @@ export interface SuggestedQuestion {
   relatedNodes: string[];
 }
 
+export interface TokenEstimate {
+  rawTokens: number;
+  graphTokens: number;
+  reductionRatio: number;
+}
+
 export interface GraphAnalysisResult {
   godNodes: GodNode[];
   surprisingConnections: SurprisingConnection[];
   communityHints: CommunityHint[];
   suggestedQuestions: SuggestedQuestion[];
   summary: string;
+  /** Human-readable Markdown report (GRAPH_REPORT.md style). */
+  markdownReport: string;
+  /** Approximate token reduction of querying the graph vs reading raw notes. */
+  tokenEstimate?: TokenEstimate;
 }
 
 export interface AnalyzeOpts {
@@ -98,15 +113,61 @@ export interface ConfidenceFilteredEdge {
 }
 
 // ─────────────────────────────────────────────────────────
+// In-memory snapshot (eliminates N+1 SQLite queries)
+// ─────────────────────────────────────────────────────────
+
+interface GraphSnapshot {
+  nodes: Map<number, VaultNode>;
+  edges: VaultEdge[];
+  tags: Map<number, string[]>;
+  nodeIds: number[];
+}
+
+/**
+ * Build an in-memory snapshot from the store.
+ *
+ * Prefer batch methods (getAllNodes, getNodeTagMap) when available;
+ * fall back to getAllNodeIds + per-node lookups for test mocks.
+ */
+function buildSnapshot(store: VaultGraphStore): GraphSnapshot {
+  // Fast path: batch load in 3 queries
+  let nodes: VaultNode[];
+  let tags: Map<number, string[]>;
+
+  if (typeof (store as any).getAllNodes === "function") {
+    nodes = (store as any).getAllNodes();
+  } else {
+    const ids = store.getAllNodeIds();
+    nodes = [];
+    for (const id of ids) {
+      const n = store.getNodeById(id);
+      if (n) nodes.push(n);
+    }
+  }
+
+  if (typeof (store as any).getNodeTagMap === "function") {
+    tags = (store as any).getNodeTagMap();
+  } else {
+    tags = new Map();
+    for (const node of nodes) {
+      const t = store.getTagsByNode(node.id);
+      tags.set(node.id, t.map((x) => x.tag));
+    }
+  }
+
+  const edges = store.getAllEdges();
+  const nodeMap = new Map<number, VaultNode>();
+  for (const n of nodes) nodeMap.set(n.id, n);
+
+  return { nodes: nodeMap, edges, tags, nodeIds: nodes.map((n) => n.id) };
+}
+
+// ─────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────
 
-function getNodeTags(store: VaultGraphStore, nodeId: number): string[] {
-  try {
-    return store.getTagsByNode(nodeId).map((t) => t.tag);
-  } catch {
-    return [];
-  }
+function getNodeTags(snap: GraphSnapshot, nodeId: number): string[] {
+  return snap.tags.get(nodeId) ?? [];
 }
 
 function tagSimilarity(a: string[], b: string[]): number {
@@ -120,25 +181,30 @@ function pathModulePrefix(path: string): string {
   return path.split("/").slice(0, 2).join("/");
 }
 
+function getExtension(path: string): string {
+  const lastDot = path.lastIndexOf(".");
+  if (lastDot === -1) return "";
+  return path.substring(lastDot);
+}
+
 // ─────────────────────────────────────────────────────────
 // God nodes — top by in_degree + PageRank
 // ─────────────────────────────────────────────────────────
 
 function findGodNodes(
-  store: VaultGraphStore,
+  snap: GraphSnapshot,
   search: VaultGraphSearch,
   limit: number,
 ): GodNode[] {
-  const allNodeIds = store.getAllNodeIds();
   const pr = search.pageRank();
+  const N = snap.nodeIds.length;
 
   const scored: Array<{ node: VaultNode; score: number; pr: number }> = [];
-  for (const id of allNodeIds) {
-    const node = store.getNodeById(id);
+  for (const id of snap.nodeIds) {
+    const node = snap.nodes.get(id);
     if (!node) continue;
     const pageRank = pr.get(id) ?? 0;
-    // Composite: PageRank (primary) + normalized in_degree
-    const inDegScore = node.in_degree / Math.max(1, allNodeIds.length);
+    const inDegScore = node.in_degree / Math.max(1, N);
     const score = pageRank * 0.7 + inDegScore * 0.3;
     scored.push({ node, score, pr: pageRank });
   }
@@ -152,8 +218,29 @@ function findGodNodes(
     inDegree: node.in_degree,
     outDegree: node.out_degree,
     pageRank: pr,
-    tags: getNodeTags(store, node.id),
+    tags: getNodeTags(snap, node.id),
   }));
+}
+
+function explainSurprisingConnection(
+  source: VaultNode,
+  target: VaultNode,
+  sourceTags: string[],
+  targetTags: string[],
+  unexpectedness: number,
+): string {
+  const reasons: string[] = [];
+  if (sourceTags.length === 0 || targetTags.length === 0 || tagSimilarity(sourceTags, targetTags) === 0) {
+    reasons.push("no shared tags");
+  }
+  if (pathModulePrefix(source.note_path) !== pathModulePrefix(target.note_path)) {
+    reasons.push(`cross-module (${pathModulePrefix(source.note_path)} → ${pathModulePrefix(target.note_path)})`);
+  }
+  if (getExtension(source.note_path) !== getExtension(target.note_path)) {
+    reasons.push(`cross-file-type (${getExtension(source.note_path)} → ${getExtension(target.note_path)})`);
+  }
+  if (reasons.length === 0) reasons.push("low tag similarity");
+  return `Unexpected because ${reasons.join(", ")} (score=${unexpectedness.toFixed(2)}).`;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -161,40 +248,42 @@ function findGodNodes(
 // ─────────────────────────────────────────────────────────
 
 function findSurprisingConnections(
-  store: VaultGraphStore,
+  snap: GraphSnapshot,
   limit: number,
 ): SurprisingConnection[] {
-  const allEdges = store.getAllEdges();
-  const scored: Array<{ edge: VaultEdge; unexpectedness: number; sourceTags: string[]; targetTags: string[] }> = [];
+  const scored: Array<{
+    edge: VaultEdge;
+    unexpectedness: number;
+    sourceTags: string[];
+    targetTags: string[];
+  }> = [];
 
-  for (const edge of allEdges) {
+  for (const edge of snap.edges) {
     if (!edge.target_id) continue;
-    const source = store.getNodeById(edge.source_id);
-    const target = store.getNodeById(edge.target_id);
+    const source = snap.nodes.get(edge.source_id);
+    const target = snap.nodes.get(edge.target_id);
     if (!source || !target) continue;
 
-    const sourceTags = getNodeTags(store, source.id);
-    const targetTags = getNodeTags(store, target.id);
+    const sourceTags = getNodeTags(snap, source.id);
+    const targetTags = getNodeTags(snap, target.id);
     const sim = tagSimilarity(sourceTags, targetTags);
-    const pathSim = pathModulePrefix(source.note_path) === pathModulePrefix(target.note_path) ? 1 : 0;
+    const pathSim =
+      pathModulePrefix(source.note_path) === pathModulePrefix(target.note_path) ? 1 : 0;
 
-    // Unexpected = low tag similarity AND different path prefix AND not external
     const unexpectedness = (1 - sim) * 0.5 + (1 - pathSim) * 0.5;
-    if (unexpectedness < 0.3) continue; // Not surprising enough
+    if (unexpectedness < 0.3) continue;
 
-    scored.push({
-      edge,
-      unexpectedness,
-      sourceTags,
-      targetTags,
-    });
+    scored.push({ edge, unexpectedness, sourceTags, targetTags });
   }
 
   scored.sort((a, b) => b.unexpectedness - a.unexpectedness);
 
   return scored.slice(0, limit).map(({ edge, unexpectedness, sourceTags, targetTags }) => {
-    const source = store.getNodeById(edge.source_id);
-    const target = edge.target_id ? store.getNodeById(edge.target_id) : null;
+    const source = snap.nodes.get(edge.source_id);
+    const target = edge.target_id ? snap.nodes.get(edge.target_id) : null;
+    const explanation = source && target
+      ? explainSurprisingConnection(source, target, sourceTags, targetTags, unexpectedness)
+      : undefined;
     return {
       sourcePath: source?.note_path ?? "",
       targetPath: target?.note_path ?? "",
@@ -203,6 +292,7 @@ function findSurprisingConnections(
       sourceTags,
       targetTags,
       context: edge.context,
+      explanation,
     };
   });
 }
@@ -212,94 +302,202 @@ function findSurprisingConnections(
 // ─────────────────────────────────────────────────────────
 
 function findCommunityHints(
-  store: VaultGraphStore,
+  snap: GraphSnapshot,
   limit: number,
 ): CommunityHint[] {
-  const allNodeIds = store.getAllNodeIds();
-  const allEdges = store.getAllEdges();
+  const { nodes, edges, nodeIds } = snap;
 
-  // Build adjacency + tag groups
+  // Build adjacency list once
   const adj = new Map<number, Set<number>>();
-  for (const edge of allEdges) {
+  for (const edge of edges) {
     if (!edge.target_id) continue;
     const set = adj.get(edge.source_id);
     if (set) set.add(edge.target_id);
     else adj.set(edge.source_id, new Set([edge.target_id]));
   }
 
-  // Greedy community expansion by tag similarity + edge density
-  const visited = new Set<number>();
-  const communities: Array<{ nodes: VaultNode[]; edges: number; internal: number; tags: Set<string> }> = [];
+  // Union-Find for fast community grouping by tag/path similarity
+  const parent = new Map<number, number>();
+  for (const id of nodeIds) parent.set(id, id);
 
-  for (const id of allNodeIds) {
-    if (visited.has(id)) continue;
-    const node = store.getNodeById(id);
-    if (!node) continue;
-
-    const community = new Set<number>([id]);
-    const frontier = [id];
-    let idx = 0;
-    while (idx < frontier.length) {
-      const current = frontier[idx++];
-      const neighbors = adj.get(current);
-      if (!neighbors) continue;
-      for (const nId of neighbors) {
-        if (visited.has(nId)) continue;
-        const nNode = store.getNodeById(nId);
-        if (!nNode) continue;
-        // Accept if shares >=1 tag or same path prefix
-        const cNode = store.getNodeById(current);
-        const cTags = getNodeTags(store, current);
-        const nTags = getNodeTags(store, nId);
-        const shareTag = cTags.length === 0 || nTags.length === 0 || tagSimilarity(cTags, nTags) > 0;
-        const sharePath = pathModulePrefix(cNode?.note_path ?? "") === pathModulePrefix(nNode.note_path);
-        if (shareTag || sharePath) {
-          community.add(nId);
-          frontier.push(nId);
-        }
-      }
+  function find(id: number): number {
+    let p = parent.get(id);
+    if (p === undefined) return id;
+    while (p !== id) {
+      const gp = parent.get(p);
+      if (gp === undefined) break;
+      parent.set(id, gp); // path compression
+      id = p;
+      p = gp;
     }
+    return p;
+  }
 
-    for (const cId of community) visited.add(cId);
+  function union(a: number, b: number): void {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  }
 
-    const nodes = Array.from(community)
-      .map((cid) => store.getNodeById(cid))
+  // Union nodes that share a tag or path prefix
+  for (const edge of edges) {
+    if (!edge.target_id) continue;
+    const s = nodes.get(edge.source_id);
+    const t = nodes.get(edge.target_id);
+    if (!s || !t) continue;
+
+    const sTags = getNodeTags(snap, s.id);
+    const tTags = getNodeTags(snap, t.id);
+    const shareTag = sTags.length === 0 || tTags.length === 0 || tagSimilarity(sTags, tTags) > 0;
+    const sharePath = pathModulePrefix(s.note_path) === pathModulePrefix(t.note_path);
+
+    if (shareTag || sharePath) {
+      union(s.id, t.id);
+    }
+  }
+
+  // Group by root
+  const groups = new Map<number, Set<number>>();
+  for (const id of nodeIds) {
+    const root = find(id);
+    const g = groups.get(root);
+    if (g) g.add(id);
+    else groups.set(root, new Set([id]));
+  }
+
+  // Build communities from groups (size >= 2)
+  const communities: Array<{
+    nodes: VaultNode[];
+    internal: number;
+    external: number;
+    tags: Set<string>;
+  }> = [];
+
+  for (const memberIds of groups.values()) {
+    if (memberIds.size < 2) continue;
+    const memberArray = Array.from(memberIds);
+    const commNodes = memberArray
+      .map((cid) => nodes.get(cid))
       .filter(Boolean) as VaultNode[];
 
+    // Count internal/external edges in one pass
     let internalEdges = 0;
     let externalEdges = 0;
-    for (const edge of allEdges) {
+    for (const edge of edges) {
       if (!edge.target_id) continue;
-      const srcIn = community.has(edge.source_id);
-      const tgtIn = community.has(edge.target_id);
+      const srcIn = memberIds.has(edge.source_id);
+      const tgtIn = memberIds.has(edge.target_id);
       if (srcIn && tgtIn) internalEdges++;
       else if (srcIn || tgtIn) externalEdges++;
     }
 
     const allTags = new Set<string>();
-    for (const n of nodes) {
-      for (const t of getNodeTags(store, n.id)) allTags.add(t);
+    for (const n of commNodes) {
+      for (const t of getNodeTags(snap, n.id)) allTags.add(t);
     }
 
-    communities.push({ nodes, edges: internalEdges + externalEdges, internal: internalEdges, tags: allTags });
+    communities.push({
+      nodes: commNodes,
+      internal: internalEdges,
+      external: externalEdges,
+      tags: allTags,
+    });
   }
 
-  // Merge overlapping communities (simplified: skip for now to keep O(n))
-  const maxPossible = (nodes: VaultNode[]) => nodes.length * (nodes.length - 1) / 2;
+  const maxPossible = (ns: VaultNode[]) => (ns.length * (ns.length - 1)) / 2;
   const ranked = communities
-    .filter((c) => c.nodes.length >= 2)
     .map((c, i) => ({
       id: i,
-      representativePath: c.nodes[0].note_path,
+      representativePath: c.nodes[0]?.note_path ?? "",
       nodeCount: c.nodes.length,
       internalEdges: c.internal,
-      externalEdges: c.edges - c.internal,
+      externalEdges: c.external,
       avgInternalDensity: c.internal / Math.max(1, maxPossible(c.nodes)),
       tags: Array.from(c.tags),
     }))
     .sort((a, b) => b.avgInternalDensity - a.avgInternalDensity);
 
   return ranked.slice(0, limit);
+}
+
+// ─────────────────────────────────────────────────────────
+// Markdown report (GRAPH_REPORT.md style) inspired by graphify
+// ─────────────────────────────────────────────────────────
+
+function generateMarkdownReport(
+  result: Pick<GraphAnalysisResult, "godNodes" | "surprisingConnections" | "communityHints" | "suggestedQuestions" | "summary">,
+  nodeCount: number,
+  edgeCount: number,
+): string {
+  const lines: string[] = [];
+  lines.push("# Graph Analysis Report");
+  lines.push("");
+  lines.push(`- **Nodes:** ${nodeCount} | **Edges:** ${edgeCount}`);
+  lines.push("");
+
+  if (result.godNodes.length > 0) {
+    lines.push("## God Nodes (Architectural Hubs)");
+    lines.push("");
+    for (const n of result.godNodes.slice(0, 5)) {
+      lines.push(`- **${n.title}** (${n.path}) — PR=${n.pageRank?.toFixed(3) ?? "N/A"}, in=${n.inDegree}, out=${n.outDegree}`);
+    }
+    lines.push("");
+  }
+
+  if (result.surprisingConnections.length > 0) {
+    lines.push("## Surprising Connections");
+    lines.push("");
+    for (const s of result.surprisingConnections.slice(0, 5)) {
+      lines.push(`- \`${s.sourcePath}\` → \`${s.targetPath}\` (${s.edgeType}) — unexpectedness=${s.unexpectedness.toFixed(2)}`);
+      if (s.explanation) lines.push(`  - *Why:* ${s.explanation}`);
+    }
+    lines.push("");
+  }
+
+  if (result.communityHints.length > 0) {
+    lines.push("## Community Hints");
+    lines.push("");
+    for (const c of result.communityHints) {
+      lines.push(`- **${c.representativePath}** — ${c.nodeCount} nodes, density=${c.avgInternalDensity.toFixed(2)}`);
+    }
+    lines.push("");
+  }
+
+  if (result.suggestedQuestions.length > 0) {
+    lines.push("## Suggested Questions");
+    lines.push("");
+    for (const q of result.suggestedQuestions) {
+      lines.push(`- ${q.question}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("## Summary");
+  lines.push("");
+  lines.push(result.summary);
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+function computeTokenEstimate(
+  nodeCount: number,
+  result: Pick<GraphAnalysisResult, "godNodes" | "surprisingConnections" | "communityHints" | "suggestedQuestions">,
+): TokenEstimate {
+  const avgNoteTokens = 400;
+  const rawTokens = nodeCount * avgNoteTokens;
+  const graphTokens =
+    200 +
+    result.godNodes.length * 50 +
+    result.surprisingConnections.length * 30 +
+    result.communityHints.length * 40 +
+    result.suggestedQuestions.length * 20;
+  const reductionRatio = rawTokens / Math.max(1, graphTokens);
+  return {
+    rawTokens,
+    graphTokens,
+    reductionRatio: Math.round(reductionRatio * 10) / 10,
+  };
 }
 
 // ─────────────────────────────────────────────────────────
@@ -322,7 +520,11 @@ function generateQuestions(
       const q = `How does ${a.title} relate to ${b.title}?`;
       if (!used.has(q)) {
         used.add(q);
-        questions.push({ question: q, relevance: (a.pageRank ?? 0) + (b.pageRank ?? 0), relatedNodes: [a.path, b.path] });
+        questions.push({
+          question: q,
+          relevance: (a.pageRank ?? 0) + (b.pageRank ?? 0),
+          relatedNodes: [a.path, b.path],
+        });
       }
     }
   }
@@ -359,14 +561,16 @@ export function analyzeGraph(
   search: VaultGraphSearch,
   opts: AnalyzeOpts = {},
 ): GraphAnalysisResult {
+  const snap = buildSnapshot(store);
+
   const godNodeLimit = opts.godNodeLimit ?? 10;
   const surpriseLimit = opts.surpriseLimit ?? 10;
   const communityLimit = opts.communityLimit ?? 5;
   const questionLimit = opts.questionLimit ?? 5;
 
-  const godNodes = findGodNodes(store, search, godNodeLimit);
-  const surprisingConnections = findSurprisingConnections(store, surpriseLimit);
-  const communityHints = findCommunityHints(store, communityLimit);
+  const godNodes = findGodNodes(snap, search, godNodeLimit);
+  const surprisingConnections = findSurprisingConnections(snap, surpriseLimit);
+  const communityHints = findCommunityHints(snap, communityLimit);
   const suggestedQuestions = generateQuestions(godNodes, surprisingConnections, questionLimit);
 
   const summary = [
@@ -377,7 +581,19 @@ export function analyzeGraph(
       : "No surprising cross-community connections found.",
   ].join(" ");
 
-  return { godNodes, surprisingConnections, communityHints, suggestedQuestions, summary };
+  const result: GraphAnalysisResult = {
+    godNodes,
+    surprisingConnections,
+    communityHints,
+    suggestedQuestions,
+    summary,
+    markdownReport: "",
+  };
+
+  result.markdownReport = generateMarkdownReport(result, snap.nodeIds.length, snap.edges.length);
+  result.tokenEstimate = computeTokenEstimate(snap.nodeIds.length, result);
+
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -400,33 +616,33 @@ export function computeSurpriseScores(
   store: VaultGraphStore,
   limit: number = 20,
 ): SurpriseScoreResult[] {
-  const allNodeIds = store.getAllNodeIds();
-  const allEdges = store.getAllEdges();
+  const snap = buildSnapshot(store);
 
-  // Build reverse adjacency + out-adjacency for degree counting
-  const nodeData = new Map<number, {
-    degree: number;
-    crossCommunity: number;
-    crossFileType: number;
-    tags: string[];
-  }>();
+  // Pre-compute node metadata
+  const nodeData = new Map<
+    number,
+    {
+      degree: number;
+      crossCommunity: number;
+      crossFileType: number;
+      tags: string[];
+    }
+  >();
 
-  for (const id of allNodeIds) {
-    nodeData.set(id, { degree: 0, crossCommunity: 0, crossFileType: 0, tags: getNodeTags(store, id) });
+  for (const id of snap.nodeIds) {
+    nodeData.set(id, { degree: 0, crossCommunity: 0, crossFileType: 0, tags: getNodeTags(snap, id) });
   }
 
-  for (const edge of allEdges) {
+  for (const edge of snap.edges) {
     if (edge.target_id === null) continue;
 
-    // Count degree for both source and target
     const src = nodeData.get(edge.source_id);
     const tgt = nodeData.get(edge.target_id);
     if (src) src.degree++;
     if (tgt) tgt.degree++;
 
-    // Cross-community check: different path-module prefix AND zero tag overlap
-    const sourceNode = store.getNodeById(edge.source_id);
-    const targetNode = store.getNodeById(edge.target_id);
+    const sourceNode = snap.nodes.get(edge.source_id);
+    const targetNode = snap.nodes.get(edge.target_id);
     if (sourceNode && targetNode) {
       const srcPrefix = pathModulePrefix(sourceNode.note_path);
       const tgtPrefix = pathModulePrefix(targetNode.note_path);
@@ -439,7 +655,6 @@ export function computeSurpriseScores(
         if (tgt) tgt.crossCommunity++;
       }
 
-      // Cross-file-type check: different extensions
       const srcExt = getExtension(sourceNode.note_path);
       const tgtExt = getExtension(targetNode.note_path);
       if (srcExt !== tgtExt) {
@@ -450,10 +665,10 @@ export function computeSurpriseScores(
   }
 
   const results: SurpriseScoreResult[] = [];
-  for (const id of allNodeIds) {
+  for (const id of snap.nodeIds) {
     const data = nodeData.get(id);
     if (!data) continue;
-    const node = store.getNodeById(id);
+    const node = snap.nodes.get(id);
     if (!node) continue;
 
     const surprise = data.degree * 0.3 + data.crossCommunity * 0.4 + data.crossFileType * 0.3;
@@ -483,21 +698,21 @@ export function filterEdgesByConfidence(
   store: VaultGraphStore,
   minConfidence: number = 0.0,
 ): ConfidenceFilteredEdge[] {
+  const snap = buildSnapshot(store);
   const confidenceValue: Record<string, number> = {
     EXTRACTED: 1.0,
     INFERRED: 0.7,
     AMBIGUOUS: 0.5,
   };
 
-  const allEdges = store.getAllEdges();
   const results: ConfidenceFilteredEdge[] = [];
 
-  for (const edge of allEdges) {
+  for (const edge of snap.edges) {
     const value = confidenceValue[edge.confidence] ?? 1.0;
     if (value < minConfidence) continue;
 
-    const source = store.getNodeById(edge.source_id);
-    const target = edge.target_id ? store.getNodeById(edge.target_id) : null;
+    const source = snap.nodes.get(edge.source_id);
+    const target = edge.target_id ? snap.nodes.get(edge.target_id) : null;
 
     results.push({
       edgeId: edge.id,
@@ -510,11 +725,4 @@ export function filterEdgesByConfidence(
   }
 
   return results;
-}
-
-/** Extract file extension from a path. */
-function getExtension(path: string): string {
-  const lastDot = path.lastIndexOf(".");
-  if (lastDot === -1) return "";
-  return path.substring(lastDot);
 }

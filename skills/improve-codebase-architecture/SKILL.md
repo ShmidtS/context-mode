@@ -29,6 +29,8 @@ This skill is _informed_ by the project's domain model. The domain language give
 
 Read the project's domain glossary and any ADRs in the area you're touching first.
 
+Query the vault graph (`ctx_vault_graph` with `mode: "surprises"` or `mode: "neighbors"`, `ctx_graph_analyze`) to surface code dependencies, god nodes, and cross-module connections that may reveal hidden coupling or shallow seams.
+
 Then use the Agent tool (model=haiku, explore agent) to walk the codebase. Explore organically and note friction:
 
 - Understanding one concept requires bouncing between many small modules?

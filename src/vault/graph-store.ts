@@ -469,6 +469,26 @@ export class VaultGraphStore {
     return rows.map((r) => this.#mapEdge(r));
   }
 
+  // ── Batch reads (single-query, for analytics) ──
+
+  /** Load all nodes in one query. */
+  getAllNodes(): VaultNode[] {
+    const rows = this.#db.prepare("SELECT * FROM vault_nodes").all() as NodeRow[];
+    return rows.map((r) => this.#mapNode(r));
+  }
+
+  /** Build a Map<nodeId, tags[]> from all vault_tags in one query. */
+  getNodeTagMap(): Map<number, string[]> {
+    const rows = this.#db.prepare("SELECT node_id, tag FROM vault_tags").all() as Array<{ node_id: number; tag: string }>;
+    const map = new Map<number, string[]>();
+    for (const { node_id, tag } of rows) {
+      const list = map.get(node_id);
+      if (list) list.push(tag);
+      else map.set(node_id, [tag]);
+    }
+    return map;
+  }
+
   // ── Tag CRUD ──
 
   /** Insert a tag for a node. */

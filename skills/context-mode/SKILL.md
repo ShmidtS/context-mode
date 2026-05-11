@@ -15,6 +15,9 @@ description: |
   "outdated packages", "dependency tree", "cloud resources", "CI/CD output".
   Also triggers on ANY MCP tool output that may exceed 20 lines.
   Subagent routing is handled automatically via PreToolUse hook.
+  Vault graph (wiki-links, backlinks, tag clusters, code dependencies) is active by default
+  for the current project — use ctx_vault_graph to traverse relationships and ctx_graph_analyze
+  for architectural insights. Auto-indexes on first access.
 ---
 
 # Context Mode: Default for All Large Output
@@ -63,6 +66,12 @@ About to run a command / read a file / call an API?
 |   -- Run via ctx_execute (shell) -- each call gets its own subprocess:
 |       ctx_execute({ language: "shell", code: "agent-browser open example.com && agent-browser snapshot -i -c" })
 |
+|-- Exploring relationships between markdown notes, wiki-links, tags, or code dependencies?
+|   -- Use ctx_vault_graph (neighbors, backlinks, tag-cluster, surprises, confidence-filter)
+|      Project auto-indexes on first access; no manual ctx_vault_index needed for current project.
+|      If graph is empty (no markdown notes with wiki-links or tags), fall back to ctx_search.
+|   -- Use ctx_graph_analyze for god nodes, community hints, surprise connections, suggested questions.
+|
 |-- Processing output from another MCP tool (Context7, GitHub API, etc.)?
 |   |-- Output already in context from a previous tool call?
 |   |   -- Use it directly. Do NOT re-index with ctx_index(content: ...).
@@ -94,6 +103,9 @@ About to run a command / read a file / call an API?
 | MCP output (already in context) | Use directly | Don't re-index -- it's already loaded |
 | MCP output (need multi-query) | `ctx_execute` to save -> `ctx_index(path)` -> `ctx_search` | Save to file first, index server-side |
 | Wipe indexed KB content | `ctx_purge(confirm: true)` | Permanently deletes all indexed content |
+| Explore note relationships / wiki-links | `ctx_vault_graph` | `ctx_vault_graph({mode:"neighbors", nodePath:"...", maxHops:2})` |
+| Analyze knowledge graph structure | `ctx_graph_analyze` | `ctx_graph_analyze({godNodeLimit:10, surpriseLimit:10})` — returns god nodes, communities, surprising links with plain-English explanations, suggested questions, markdown report, and approximate token-reduction estimate. |
+| Index external vault manually | `ctx_vault_index` | `ctx_vault_index({vaultPath:"/abs/path"})` — only for non-project vaults |
 
 ## Automatic Triggers
 
@@ -106,6 +118,7 @@ Use context-mode for ANY of these, without being asked:
 5. **Infrastructure & builds**: "list containers", "check pods", "build project", "compile errors"
 6. **Dependency audit**: "check dependencies", "outdated packages", "security audit"
 7. **Web docs lookup**: "look up docs", "API reference", "fetch documentation"
+8. **Knowledge graph exploration**: "related notes", "wiki-links", "backlinks", "tag cluster", "obsidian", "vault graph", "note dependencies", "code dependencies"
 
 ## Language Selection
 
@@ -135,6 +148,8 @@ Use context-mode for ANY of these, without being asked:
 5. **Never `ctx_index(content: large_data)`.** Use `ctx_index(path: ...)` to read server-side. The `content` parameter sends data through context.
 6. **Always use `filename` on Playwright.** `browser_snapshot`, `browser_console_messages`, `browser_network_requests` -- without it, output floods context.
 7. **Don't re-index data already in context.** If an MCP tool returned data, use it directly or save to file first.
+8. **Vault auto-indexes on first use.** `ctx_vault_graph` and `ctx_graph_analyze` automatically index the current project directory when first called in a session. No need to call `ctx_vault_index` for the current project.
+9. **Empty vault -> fall back to `ctx_search`.** If the project has no markdown notes with wiki-links or tags, `ctx_vault_graph` returns empty results. Use `ctx_search` for code-level queries instead.
 
 ## Platform-Specific Skills
 
