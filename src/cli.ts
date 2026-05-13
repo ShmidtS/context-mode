@@ -126,6 +126,22 @@ if (args[0] === "doctor") {
   // Status line implementation lives in bin/statusline.mjs to keep it
   // dependency-free and fast. Forward stdin and exit with its result.
   statuslineForward();
+} else if (args[0] === "local-index") {
+  localIndex(args[1] || ".").then((code) => process.exit(code));
+} else if (args[0] === "local-search") {
+  if (!args[1]) {
+    console.error("Usage: context-mode local-search <query>");
+    process.exit(1);
+  }
+  localSearch(args[1], args[2]).then((code) => process.exit(code));
+} else if (args[0] === "local-repos") {
+  localRepos().then((code) => process.exit(code));
+} else if (args[0] === "local-status") {
+  if (!args[1]) {
+    console.error("Usage: context-mode local-status <job-id>");
+    process.exit(1);
+  }
+  localStatus(args[1]).then((code) => process.exit(code));
 } else {
   // Default: start MCP server
   import("./server.js");
@@ -1201,6 +1217,94 @@ async function upgrade() {
   upgradeReportChanges(changes);
   upgradeRestartNotice(adapter);
   await upgradeRunDoctor(pluginRoot, adapter);
+}
+
+/* -------------------------------------------------------
+ * Local code indexing — CLI commands
+ * ------------------------------------------------------- */
+
+async function localIndex(pathArg: string): Promise<number> {
+  try {
+    const { LocalIndexer } = await import("./local-indexer.js");
+    const { resolve } = await import("node:path");
+    const dir = resolve(pathArg);
+    const repoId = dir.replace(/\\/g, "/").split("/").filter(Boolean).pop() || "repo";
+    const indexer = new LocalIndexer();
+    const result = await indexer.indexRepository(dir, repoId);
+    indexer.close();
+    if (result.status === "completed") {
+      console.log(`Indexed ${result.filesIndexed} files (${result.chunksIndexed} chunks). Job: ${result.id}`);
+      return 0;
+    }
+    console.error(`Index failed: ${result.error || "unknown"}`);
+    return 1;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`local-index error: ${message}`);
+    return 1;
+  }
+}
+
+async function localSearch(query: string, repoId?: string): Promise<number> {
+  try {
+    const { LocalSearcher } = await import("./searcher.js");
+    const { rerank } = await import("./rerank.js");
+    const { formatResults } = await import("./result-formatter.js");
+    const searcher = new LocalSearcher();
+    const results = await searcher.search(query, repoId, 10);
+    searcher.close();
+    const reranked = await rerank(query, results, 10);
+    const formatted = formatResults(reranked, 2000);
+    console.log(JSON.stringify(formatted, null, 2));
+    return 0;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`local-search error: ${message}`);
+    return 1;
+  }
+}
+
+async function localRepos(): Promise<number> {
+  try {
+    const { LocalIndexer } = await import("./local-indexer.js");
+    const indexer = new LocalIndexer();
+    const repos = indexer.listRepos();
+    indexer.close();
+    if (repos.length === 0) {
+      console.log("No repositories indexed.");
+    } else {
+      for (const r of repos) {
+        console.log(`${r.repoId}: ${r.files} files`);
+      }
+    }
+    return 0;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`local-repos error: ${message}`);
+    return 1;
+  }
+}
+
+async function localStatus(jobId: string): Promise<number> {
+  try {
+    const { LocalIndexer } = await import("./local-indexer.js");
+    const indexer = new LocalIndexer();
+    const job = indexer.getJobStatus(jobId);
+    indexer.close();
+    if (!job) {
+      console.error(`Job not found: ${jobId}`);
+      return 1;
+    }
+    console.log(`status: ${job.status}`);
+    console.log(`files: ${job.filesIndexed}`);
+    console.log(`chunks: ${job.chunksIndexed}`);
+    if (job.error) console.log(`error: ${job.error}`);
+    return 0;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`local-status error: ${message}`);
+    return 1;
+  }
 }
 
 /* -------------------------------------------------------

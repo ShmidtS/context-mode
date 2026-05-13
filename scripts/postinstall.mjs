@@ -173,3 +173,21 @@ try {
     platform: process.platform,
   });
 } catch { /* best effort — never block install */ }
+
+// ── 5. Lazy-download ONNX embedding models ─────────────────────────
+const MODEL_DIR = resolve(homedir(), ".context-mode", "models");
+const MODELS = {
+  "all-MiniLM-L6-v2.onnx": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx",
+  "ms-marco-MiniLM-L-6-v2.onnx": "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2/resolve/main/onnx/model.onnx",
+};
+
+try {
+  mkdirSync(MODEL_DIR, { recursive: true });
+  for (const [name, url] of Object.entries(MODELS)) {
+    const dest = resolve(MODEL_DIR, name);
+    if (existsSync(dest)) continue;
+    // Models are large (~350MB); download is deferred to first use to keep install fast.
+    // Write a .url marker so the runtime knows where to fetch if needed.
+    writeFileSync(dest + ".url", url);
+  }
+} catch { /* best effort */ }

@@ -11,6 +11,7 @@ import { registerVaultTools } from "./vault.js";
 import { registerContextStreamTools } from "./context-stream.js";
 import { registerCodeGraphTools } from "./codegraph.js";
 import { registerConnectorTools } from "./connectors.js";
+import { registerLocalIndexTools } from "./local-index.js";
 
 export function registerAllTools(
   server: import("@modelcontextprotocol/sdk/server/mcp.js").McpServer,
@@ -24,4 +25,5 @@ export function registerAllTools(
   registerContextStreamTools(server);
   registerCodeGraphTools(server);
   registerConnectorTools(server);
+  registerLocalIndexTools(server);
 }
