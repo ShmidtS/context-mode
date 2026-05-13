@@ -9,6 +9,8 @@
  *   5. Track progress via jobs table
  */
 
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Database as DatabaseInstance } from "better-sqlite3";
 import { loadDatabase, applyWALPragmas, withRetry } from "./db-base.js";
 import { initLocalSchema, prepareLocalStatements, type PreparedLocalStatements } from "./db-schema.js";
@@ -49,6 +51,7 @@ export class LocalIndexer {
   constructor(dbPath?: string) {
     const Database = loadDatabase();
     this.dbPath = dbPath || normalizePath(`${process.cwd()}/.context-mode/code-index.db`);
+    mkdirSync(dirname(this.dbPath), { recursive: true });
     this.db = new Database(this.dbPath, { timeout: 30000 });
     applyWALPragmas(this.db);
     initLocalSchema(this.db);

@@ -6,6 +6,8 @@
  * 3. Fuse BM25 rank + cosine score for final ranking.
  */
 
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Database as DatabaseInstance } from "better-sqlite3";
 import { loadDatabase, applyWALPragmas } from "./db-base.js";
 import { initLocalSchema, prepareLocalStatements } from "./db-schema.js";
@@ -69,6 +71,7 @@ export class LocalSearcher {
   constructor(dbPath?: string) {
     const Database = loadDatabase();
     this.dbPath = dbPath || `${process.cwd()}/.context-mode/code-index.db`;
+    mkdirSync(dirname(this.dbPath), { recursive: true });
     this.db = new Database(this.dbPath, { timeout: 30000 });
     applyWALPragmas(this.db);
     initLocalSchema(this.db);
